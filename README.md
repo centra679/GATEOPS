@@ -201,7 +201,8 @@ Setelah bootstrap berhasil, hapus secret bootstrap dari environment untuk memini
 
 GateOps menggunakan mekanisme autentikasi yang disesuaikan dengan kebutuhan operasional:
 
-- Login mengandalkan resolver khusus NRP/PIN
+- Admin dan personel menggunakan satu pilihan login NRP/PIN; resolver backend menentukan role dari identitas yang cocok. Keluarga/Persit tetap menggunakan pilihan login dan kode akun tersendiri
+- Pencarian identitas Admin/Personel memakai pembatasan percobaan bersama; identitas ambigu ditolak
 - PIN tidak disimpan di tabel operasional
 - Suatu identitas dan IP dibatasi pada percobaan login tertentu
 - Kegagalan login tidak membocorkan keberadaan akun

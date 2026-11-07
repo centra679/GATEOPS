@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isAccountRole } from "@/lib/auth/roles";
+import { isLoginRole } from "@/lib/auth/roles";
 import { readJsonBody } from "@/lib/http/json";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   const { role, identifier, pin } = body as Record<string, unknown>;
   if (
-    !isAccountRole(role) ||
+    !isLoginRole(role) ||
     typeof identifier !== "string" ||
     identifier.trim().length === 0 ||
     identifier.length > 64 ||
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Identitas atau PIN tidak valid." }, { status: 400 });
   }
 
-  if (role === "admin" && !/^\d{7}$/.test(identifier)) {
+  if (role === "staff" && !/^\d{1,20}$/.test(identifier)) {
     return NextResponse.json({ error: "Identitas atau PIN tidak valid." }, { status: 400 });
   }
 

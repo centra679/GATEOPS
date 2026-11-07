@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { getEnvironment, hmacHex, isAccountRole, jsonResponse, normalizeIdentifier, readJsonBody } from "../_shared/security.ts";
+import { getEnvironment, hmacHex, jsonResponse, normalizeIdentifier, readJsonBody } from "../_shared/security.ts";
 
 type LoginBody = { role?: unknown; identifier?: unknown; pin?: unknown };
 
@@ -16,17 +16,21 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Permintaan tidak valid." }, 400);
   }
 
-  if (!isAccountRole(body.role) || typeof body.identifier !== "string" || typeof body.pin !== "string") {
+  if (
+    (body.role !== "staff" && body.role !== "family")
+    || typeof body.identifier !== "string"
+    || typeof body.pin !== "string"
+  ) {
     return jsonResponse({ error: "Identitas atau PIN tidak valid." }, 400);
   }
   const role = body.role;
-  const identifier = normalizeIdentifier(role, body.identifier);
+  const identifier = role === "family"
+    ? normalizeIdentifier("family", body.identifier)
+    : body.identifier.trim();
   const pin = body.pin;
-  const validIdentifier = role === "admin"
-    ? /^\d{7}$/.test(identifier)
-    : role === "personnel"
-      ? /^\d{1,20}$/.test(identifier)
-      : /^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(identifier);
+  const validIdentifier = role === "staff"
+    ? /^\d{1,20}$/.test(identifier)
+    : /^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(identifier);
   if (!validIdentifier || !/^\d{6,72}$/.test(pin)) {
     return jsonResponse({ error: "Identitas atau PIN tidak valid." }, 400);
   }
@@ -47,6 +51,12 @@ Deno.serve(async (request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
     const identityHash = await hmacHex(lookupSecret, `identity:${role}:${identifier}`);
+    const candidateRoles = role === "staff" ? ["admin", "personnel"] as const : ["family"] as const;
+    const candidateHashes = await Promise.all(
+      candidateRoles.map((candidateRole) =>
+        hmacHex(lookupSecret, `identity:${candidateRole}:${identifier}`)
+      ),
+    );
     const clientIp = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-real-ip");
     const ipHash = clientIp ? await hmacHex(lookupSecret, `ip:${clientIp}`) : null;
 
@@ -56,17 +66,19 @@ Deno.serve(async (request) => {
     });
     if (limitError) return jsonResponse({ error: "Layanan autentikasi tidak tersedia." }, 503);
 
-    const { data: identity } = await service
+    const { data: identities, error: identityError } = await service
       .from("auth_identities")
       .select("user_id, auth_email, account_role")
-      .eq("account_role", role)
-      .eq("identifier_hash", identityHash)
-      .maybeSingle();
+      .in("account_role", candidateRoles)
+      .in("identifier_hash", candidateHashes);
+    if (identityError) return jsonResponse({ error: "Layanan autentikasi tidak tersedia." }, 503);
+    const identity = identities?.length === 1 ? identities[0] : null;
+    const auditRole = identity?.account_role ?? (role === "family" ? "family" : "personnel");
 
     if (!allowed) {
       await service.rpc("record_auth_event", {
         p_user_id: identity?.user_id ?? null,
-        p_role: role,
+        p_role: auditRole,
         p_action: "login_rate_limited",
         p_ip_hash: ipHash,
       });
@@ -81,7 +93,7 @@ Deno.serve(async (request) => {
     if (authError || !identity || !authData.user || !authData.session || authData.user.id !== identity.user_id) {
       await service.rpc("record_auth_event", {
         p_user_id: identity?.user_id ?? null,
-        p_role: role,
+        p_role: auditRole,
         p_action: "login_failure",
         p_ip_hash: ipHash,
       });
@@ -92,7 +104,7 @@ Deno.serve(async (request) => {
       .from("profiles")
       .select("id")
       .eq("id", identity.user_id)
-      .eq("account_role", role)
+      .eq("account_role", identity.account_role)
       .eq("status", "active")
       .maybeSingle();
     const { data: memberships } = await service
@@ -100,16 +112,16 @@ Deno.serve(async (request) => {
       .select("unit_id")
       .eq("user_id", identity.user_id)
       .eq("status", "active");
-    const { data: accountRecord } = role === "personnel"
+    const { data: accountRecord } = identity.account_role === "personnel"
       ? await service.from("personnel").select("id").eq("id", identity.user_id).maybeSingle()
-      : role === "family"
+      : identity.account_role === "family"
         ? await service.from("family_accounts").select("id").eq("id", identity.user_id).maybeSingle()
         : { data: { id: identity.user_id } };
 
     if (!profile || !memberships?.length || !accountRecord) {
       await service.rpc("record_auth_event", {
         p_user_id: identity.user_id,
-        p_role: role,
+        p_role: identity.account_role,
         p_action: "login_failure",
         p_ip_hash: ipHash,
       });
@@ -118,7 +130,7 @@ Deno.serve(async (request) => {
 
     const { error: auditError } = await service.rpc("record_auth_event", {
       p_user_id: identity.user_id,
-      p_role: role,
+      p_role: identity.account_role,
       p_action: "login_success",
       p_ip_hash: ipHash,
     });

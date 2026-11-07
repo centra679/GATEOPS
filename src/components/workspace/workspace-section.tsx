@@ -3,13 +3,14 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { RefreshCw, Search, MapPin, ArrowUpRight, FileSpreadsheet, FileText, Fingerprint, QrCode, History, ShieldCheck } from "lucide-react";
+import { RefreshCw, Search, FileSpreadsheet, FileText, QrCode, History } from "lucide-react";
 import ExcelJS from "exceljs";
 import jsPDF from "jspdf";
 import { OperationForm } from "@/components/workspace/operation-form";
 import { PrivateDocumentUpload } from "@/components/workspace/private-document-upload";
-import { DataTable, EmptyState, ErrorState, LoadingState, MetricGrid, Panel, SectionHeading, StatusTag, Toast, type DataColumn, type DataRow } from "@/components/workspace/data-display";
-import { useWorkspaceContext, type BrandingConfig } from "@/components/workspace/app-shell";
+import { DataTable, EmptyState, ErrorState, LoadingState, Panel, SectionHeading, StatusTag, Toast, type DataColumn, type DataRow } from "@/components/workspace/data-display";
+import { useWorkspaceContext } from "@/components/workspace/app-shell";
+import { GuardDashboard, WorkspaceOverview } from "@/components/workspace/workspace-overview";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { roleLabels, type AccountRole, type EffectiveRole } from "@/lib/auth/roles";
 import { getNavigation, getSectionLabel, type SectionKey } from "@/lib/gateops/navigation";
@@ -285,14 +286,14 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
     <div className="workspace-section">
       <SectionHeading
         eyebrow={unitName.toUpperCase()}
-        title={section === "dashboard" ? `Selamat datang, ${displayName}` : label}
+        title={section === "dashboard" ? dashboardTitle(effectiveRole) : label}
         description={sectionDescription(section, effectiveRole)}
         action={<button className="icon-button refresh-button" onClick={() => setRevision((value) => value + 1)} title="Muat ulang" aria-label="Muat ulang"><RefreshCw size={17} /></button>}
       />
 
       {error && <ErrorState message={error} onRetry={() => setRevision((value) => value + 1)} />}
 
-      {section === "dashboard" && <Dashboard role={effectiveRole} accountRole={accountRole} summary={state.summary} unitName={unitName} branding={branding} />}
+      {section === "dashboard" && <WorkspaceOverview role={effectiveRole} accountRole={accountRole} summary={state.summary} unitName={unitName} />}
       {section === "guard-dashboard" && <GuardDashboard summary={state.summary} rows={state.rows} />}
       {section === "journey" && <JourneyStatus summary={state.summary} />}
       {section === "live-locations" && <LiveLocationView rows={state.rows} unitId={unitId} />}
@@ -311,7 +312,7 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
 
       {hasRows && <Panel
         title={tableTitle(section)}
-        description={`${visibleRows.length.toLocaleString("id-ID")} baris${state.rows.length !== visibleRows.length ? ` dari ${state.rows.length.toLocaleString("id-ID")}` : ""}`}
+        description={`${visibleRows.length.toLocaleString("id-ID")} catatan${state.rows.length !== visibleRows.length ? ` dari ${state.rows.length.toLocaleString("id-ID")}` : ""}`}
         action={exportableSection(section) && <ExportActions rows={visibleRows} title={label} />}
       >
         <div className="table-toolbar">
@@ -705,93 +706,6 @@ async function enrichVisits(supabase: ReturnType<typeof createSupabaseBrowserCli
   });
 }
 
-function Dashboard({ role, accountRole, summary, unitName, branding }: { role: EffectiveRole; accountRole: AccountRole; summary: DataRow | null; unitName: string; branding: BrandingConfig }) {
-  const brandName = branding.whiteLabelEnabled || !branding.showGateopsBrand ? branding.name || unitName : "GateOps";
-  if (role === "admin") {
-    const metrics = [
-      ["Total personel", summary?.total_personnel], ["Total keluarga", summary?.total_family], ["Pengguna aktif", summary?.active_users],
-      ["Personel di dalam", summary?.personnel_inside], ["Personel di luar", summary?.personnel_out],
-      ["Keluarga di dalam", summary?.family_inside], ["Keluarga di luar", summary?.family_out], ["Izin berjalan", summary?.active_plans],
-      ["Tamu di dalam", summary?.active_visitors], ["Petugas jaga aktif", summary?.active_guards],
-    ].map(([label, value]) => ({ label: String(label), value: typeof value === "number" ? value : "—" }));
-    return <>
-      <div className="dashboard-hero-shell">
-        <div className="dashboard-hero-copy">
-          <span className="dashboard-hero-badge">{branding.whiteLabelEnabled ? "WHITE LABEL" : "GATEOPS PLATFORM"} • {unitName.toUpperCase()}</span>
-          <h2>Operasional satuan dalam satu kontrol terpusat</h2>
-          <p>{branding.tagline}. Operasional satuan, akses personel, dan aktivitas pos dalam satu workspace.</p>
-        </div>
-        <div className="dashboard-hero-brand">
-          <div className="dashboard-brand-mark"><ShieldCheck size={20} /></div>
-          <div>
-            <strong>{brandName}</strong>
-            <span>{branding.showGateopsBrand ? "Powered by GateOps" : branding.tagline}</span>
-          </div>
-        </div>
-      </div>
-      <MetricGrid metrics={metrics} />
-      <Panel title={`Cakupan ${unitName}`} description="Angka berasal dari RPC dashboard dan mengikuti hak akses satuan."><div className="dashboard-shortcuts"><Shortcut href="/app/live-locations" icon={<MapPin size={17} />} label="Pantau lokasi" /><Shortcut href="/app/movements" icon={<ArrowUpRight size={17} />} label="Riwayat keluar-masuk" /><Shortcut href="/app/reports" icon={<FileText size={17} />} label="Laporan tugas" /></div></Panel>
-    </>;
-  }
-
-  if (role === "temporary_guard") {
-    const assignment = asRow(summary?.assignment);
-    return <>
-      <div className="dashboard-hero-shell compact">
-        <div className="dashboard-hero-copy">
-          <span className="dashboard-hero-badge">{branding.whiteLabelEnabled ? "WHITE LABEL" : "GATEOPS PLATFORM"} • JAGA</span>
-          <h2>Mode penugasan aktif Anda</h2>
-          <p>{branding.tagline}. Informasi tugas dan kunjungan mengikuti cakupan satuan aktif.</p>
-        </div>
-        <div className="dashboard-hero-brand">
-          <div className="dashboard-brand-mark"><ShieldCheck size={20} /></div>
-          <div>
-            <strong>{brandName}</strong>
-            <span>{branding.showGateopsBrand ? "Powered by GateOps" : branding.tagline}</span>
-          </div>
-        </div>
-      </div>
-      <MetricGrid metrics={[
-        { label: "Penugasan", value: assignment ? "Aktif" : "—", detail: assignment ? `Berakhir ${new Date(String(assignment.ends_at)).toLocaleString("id-ID")}` : "Tidak ada assignment aktif" },
-        { label: "Tamu aktif", value: typeof summary?.active_visitors === "number" ? summary.active_visitors : "—" },
-      ]} /><Panel title="Tugas berjalan" description="Status diverifikasi ulang oleh backend pada setiap tindakan."><div className="dashboard-shortcuts"><Shortcut href="/app/visitors" icon={<Fingerprint size={17} />} label="Catat tamu" /><Shortcut href="/app/active-visits" icon={<UsersRoundIcon />} label="Tamu di dalam" /><Shortcut href="/app/visit-history" icon={<HistoryIcon />} label="Riwayat kunjungan" /></div></Panel></>;
-  }
-
-  const active = asRow(summary?.active_session);
-  const plans = asRows(summary?.plans);
-  const approvedPlans = plans.filter((plan) => plan.status === "approved").length;
-  const roleLabel = roleLabels[accountRole];
-  return <>
-    <div className="dashboard-hero-shell compact">
-      <div className="dashboard-hero-copy">
-        <span className="dashboard-hero-badge">{branding.whiteLabelEnabled ? "WHITE LABEL" : "GATEOPS PLATFORM"} • {unitName.toUpperCase()}</span>
-        <h2>Selamat datang di {brandName}</h2>
-        <p>{branding.tagline}. Informasi operasional ditampilkan sesuai peran dan satuan aktif Anda.</p>
-      </div>
-      <div className="dashboard-hero-brand">
-        <div className="dashboard-brand-mark"><ShieldCheck size={20} /></div>
-        <div>
-          <strong>{brandName}</strong>
-          <span>{branding.showGateopsBrand ? "GateOps Platform" : branding.tagline}</span>
-        </div>
-      </div>
-    </div>
-    <MetricGrid metrics={[
-      { label: "Status perjalanan", value: active ? "Di luar" : "Di dalam", tone: active ? "amber" : "green" },
-      { label: "Rencana disetujui", value: approvedPlans },
-      { label: "Riwayat perjalanan", value: asRows(summary?.history).length },
-    ]} /><Panel title={`Aktivitas ${roleLabel}`} description="Informasi pribadi hanya diambil untuk akun yang sedang masuk."><div className="dashboard-shortcuts"><Shortcut href="/app/plans" icon={<ClipboardIcon />} label="Rencana izin" /><Shortcut href="/app/scan" icon={<QrIcon />} label="Scan QR" /><Shortcut href="/app/history" icon={<HistoryIcon />} label="Riwayat pribadi" /></div></Panel></>;
-}
-
-function GuardDashboard({ summary, rows }: { summary: DataRow | null; rows: DataRow[] }) {
-  const assignment = asRow(summary?.assignment);
-  return <><MetricGrid metrics={[
-    { label: "Kunjungan aktif", value: rows.filter((row) => row.status === "active").length },
-    { label: "Assignment", value: assignment ? "Aktif" : "Tidak aktif" },
-    { label: "Pos", value: String(assignment?.post_id ?? "—") },
-  ]} /><Panel title="Operasi jaga" description="Pencatatan hanya tersedia selama assignment masih aktif."><div className="dashboard-shortcuts"><Shortcut href="/app/visitors" icon={<Fingerprint size={17} />} label="Catat tamu" /><Shortcut href="/app/active-visits" icon={<UsersRoundIcon />} label="Tamu di dalam" /></div></Panel></>;
-}
-
 function JourneyStatus({ summary }: { summary: DataRow | null }) {
   const active = asRow(summary?.active_session);
   const plan = asRow(active?.plan);
@@ -888,10 +802,6 @@ function ProfileDetails({ summary }: { summary: DataRow | null }) {
   </dl></Panel>;
 }
 
-function Shortcut({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
-  return <Link className="dashboard-shortcut" href={href}><span>{icon}</span><strong>{label}</strong><ArrowUpRight size={15} /></Link>;
-}
-
 function ReasonAction({ label, placeholder, onSubmit }: { label: string; placeholder: string; onSubmit: (reason: string) => Promise<boolean | void> }) {
   const [reason, setReason] = useState("");
   const [pending, setPending] = useState(false);
@@ -949,16 +859,40 @@ function ExportActions({ rows, title }: { rows: DataRow[]; title: string }) {
 
 function sectionDescription(section: SectionKey, role: EffectiveRole) {
   const descriptions: Partial<Record<SectionKey, string>> = {
-    dashboard: role === "admin" ? "Pengawasan aktivitas pada satuan yang menjadi kewenangan." : "Status dan aktivitas akun Anda dari pusat data GateOps.",
+    dashboard: role === "admin" ? "Pantau personel, perjalanan, tamu, dan jadwal jaga." : role === "temporary_guard" ? "Tugas jaga dan kunjungan pada pos yang Anda tangani." : "Status perjalanan dan rencana izin akun Anda.",
     "live-locations": "Pembaruan GPS hanya terlihat oleh Admin satuan yang berwenang.",
     plans: "Rencana izin divalidasi dan disetujui otomatis oleh sistem.",
     scan: "QR statis pos menentukan transaksi keluar atau kembali berdasarkan sesi aktif.",
+    personnel: "Daftar personel beserta NRP, pangkat, dan status akses satuan.",
+    family: "Daftar akun Keluarga/Persit dan personel yang menjadi penghubung.",
+    accounts: "Atur status akun atau akses pengguna ke satuan ini.",
+    units: "Informasi satuan yang dapat dikelola akun Anda.",
+    posts: "Daftar pos penjagaan dan status QR pada setiap pos.",
+    qr: "Buat atau cabut QR untuk transaksi keluar-masuk di pos.",
+    movements: "Catatan scan keluar dan kembali untuk seluruh satuan.",
     visitors: "Data tamu dan kendaraan disimpan pada satuan yang ditangani.",
-    guards: "Undangan dan masa tugas dibatasi oleh server.",
+    "active-visits": "Tamu yang tercatat masih berada di dalam satuan.",
+    "visit-history": "Kunjungan yang pernah ditangani pada pos Anda.",
+    vehicles: "Kendaraan yang tercatat pada kunjungan tamu.",
+    guards: "Undangan dan jadwal jaga personel pada satuan ini.",
+    "guard-invites": "Undangan jaga yang ditujukan kepada Anda.",
+    "guard-dashboard": "Jadwal jaga, pos penugasan, dan kunjungan yang ditangani.",
+    "guard-report": "Laporan dari penugasan jaga Anda yang telah selesai.",
     reports: "Laporan penjagaan berdasarkan kunjungan dan penugasan yang tercatat.",
     audit: "Tindakan penting yang tercatat pada audit log satuan.",
+    notifications: "Pembaruan yang terkait dengan akun dan satuan Anda.",
+    settings: "Ubah nama profil dan pilihan tampilan akun.",
+    profile: "Nama, identitas, dan satuan yang terhubung ke akun Anda.",
+    journey: "Status perjalanan dan lokasi terakhir pada sesi aktif.",
+    history: "Perjalanan yang pernah Anda lakukan.",
   };
-  return descriptions[section] ?? "Data dan tindakan mengikuti hak akses role serta satuan.";
+  return descriptions[section] ?? "";
+}
+
+function dashboardTitle(role: EffectiveRole) {
+  if (role === "admin") return "Situasi satuan";
+  if (role === "temporary_guard") return "Tugas jaga";
+  return "Status perjalanan";
 }
 
 function tableTitle(section: SectionKey) {
@@ -967,17 +901,53 @@ function tableTitle(section: SectionKey) {
 }
 
 function emptyTitle(section: SectionKey) {
-  if (["plans", "history", "movements"].includes(section)) return "Belum ada perjalanan";
-  if (["visitors", "active-visits", "visit-history", "vehicles"].includes(section)) return "Belum ada kunjungan";
-  if (["reports", "guard-report"].includes(section)) return "Laporan belum tersedia";
-  return "Belum ada data";
+  const titles: Partial<Record<SectionKey, string>> = {
+    plans: "Belum ada rencana izin",
+    history: "Belum ada riwayat perjalanan",
+    movements: "Belum ada catatan keluar-masuk",
+    visitors: "Belum ada kunjungan",
+    "active-visits": "Tidak ada tamu di dalam",
+    "visit-history": "Belum ada riwayat kunjungan",
+    vehicles: "Belum ada kendaraan tercatat",
+    reports: "Belum ada laporan jaga",
+    "guard-report": "Belum ada laporan tugas",
+    personnel: "Belum ada personel",
+    family: "Belum ada akun Keluarga/Persit",
+    accounts: "Belum ada akun pada satuan ini",
+    units: "Belum ada satuan",
+    posts: "Belum ada pos penjagaan",
+    qr: "Belum ada QR pos",
+    guards: "Belum ada undangan atau jadwal jaga",
+    "guard-invites": "Belum ada undangan jaga",
+    notifications: "Tidak ada pemberitahuan baru",
+    audit: "Belum ada catatan audit",
+  };
+  return titles[section] ?? "Belum ada catatan";
 }
 
 function emptyDescription(section: SectionKey) {
-  if (section === "plans") return "Rencana izin yang disetujui atau digunakan akan tampil di sini.";
-  if (section === "active-visits") return "Tidak ada tamu yang tercatat sedang berada di dalam.";
-  if (section === "reports" || section === "guard-report") return "Laporan akan tersedia setelah tugas jaga berakhir dan pemeliharaan terjadwal dijalankan.";
-  return "Belum ada baris yang memenuhi cakupan atau filter saat ini.";
+  const descriptions: Partial<Record<SectionKey, string>> = {
+    plans: "Rencana izin yang Anda ajukan akan tercatat di sini.",
+    history: "Perjalanan selesai akan tercatat di sini.",
+    movements: "Hasil scan keluar dan kembali akan tercatat di sini.",
+    visitors: "Kunjungan tamu pada satuan ini akan tercatat di sini.",
+    "active-visits": "Semua tamu yang tercatat sudah meninggalkan satuan.",
+    "visit-history": "Kunjungan yang Anda tangani akan tercatat di sini.",
+    vehicles: "Kendaraan tamu akan tercatat bersama data kunjungannya.",
+    reports: "Laporan tersedia setelah tugas jaga selesai dan proses laporan berjalan.",
+    "guard-report": "Laporan tugas tersedia setelah jadwal jaga selesai.",
+    personnel: "Tambahkan personel untuk satuan ini melalui formulir di atas.",
+    family: "Tambahkan akun Keluarga/Persit melalui formulir di atas.",
+    accounts: "Akun akan tampil setelah dibuat dan diberi akses ke satuan ini.",
+    units: "Satuan yang dapat diakses akun ini akan tampil di sini.",
+    posts: "Tambahkan pos penjagaan untuk mulai mengatur QR.",
+    qr: "Buat QR untuk pos penjagaan melalui menu QR pos.",
+    guards: "Buat undangan jaga atau jadwal untuk personel.",
+    "guard-invites": "Undangan jaga yang dikirim admin akan tampil di sini.",
+    notifications: "Belum ada pemberitahuan untuk akun Anda.",
+    audit: "Tindakan pada satuan ini akan dicatat di sini.",
+  };
+  return descriptions[section] ?? "Tidak ada catatan yang sesuai dengan pilihan saat ini.";
 }
 
 function exportableSection(section: SectionKey) {
@@ -1035,8 +1005,3 @@ function readError(error: unknown) {
   if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
   return "Terjadi kendala saat mengambil data.";
 }
-
-function ClipboardIcon() { return <FileText size={17} />; }
-function QrIcon() { return <QrCode size={17} />; }
-function HistoryIcon() { return <History size={17} />; }
-function UsersRoundIcon() { return <ArrowUpRight size={17} />; }

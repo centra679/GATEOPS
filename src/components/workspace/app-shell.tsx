@@ -23,7 +23,7 @@ type WorkspaceContextValue = { unitId: string; unitName: string; units: Unit[]; 
 
 const defaultBranding: BrandingConfig = {
   name: "",
-  tagline: "White Label Platform",
+  tagline: "Izin, perjalanan, dan penjagaan",
   copyright: "© 2026 GateOps",
   accentColor: "#d8ed6a",
   whiteLabelEnabled: true,
@@ -121,9 +121,12 @@ export function GateOpsShell({ accountRole, effectiveRole, displayName, userId, 
     : branding.showGateopsBrand ? "GATEOPS" : brandDisplayName;
 
   function navigateTo(section: SectionKey) {
+    return `/app/${section}`;
+  }
+
+  function closeNavigation() {
     setDrawerOpen(false);
     setUnitMenuOpen(false);
-    return `/app/${section}`;
   }
 
   return (
@@ -135,7 +138,6 @@ export function GateOpsShell({ accountRole, effectiveRole, displayName, userId, 
             {branding.whiteLabelEnabled || !branding.showGateopsBrand
               ? <span className="brand-name sidebar-custom-brand">{brandDisplayName}</span>
               : <span className="brand-name">GATE<span>OPS</span></span>}
-            <span className="sidebar-version">OPS / 1.0</span>
           </Link>
 
           <div className="sidebar-role"><span className="role-indicator" /><span>{roleLabels[navigationRole]}</span></div>
@@ -160,7 +162,7 @@ export function GateOpsShell({ accountRole, effectiveRole, displayName, userId, 
                     <Link
                       key={item.key}
                       href={navigateTo(item.key)}
-                      onClick={() => setDrawerOpen(false)}
+                      onClick={closeNavigation}
                       className={`nav-link${active ? " active" : ""}`}
                       aria-current={active ? "page" : undefined}
                     >
@@ -210,21 +212,21 @@ export function GateOpsShell({ accountRole, effectiveRole, displayName, userId, 
                   </div>}
                 </div>
               )}
-              <span className="topbar-status"><i /> SESI AKTIF</span>
+              <span className="topbar-status"><i /> Sesi aktif</span>
               <LocationTracker accountRole={accountRole} userId={userId} />
               <form className="mobile-logout" action="/api/auth/logout" method="post"><button className="icon-button" type="submit" aria-label="Keluar"><LogOut size={18} /></button></form>
             </div>
           </header>
 
           <main className="app-content" key={pathname}>{children}</main>
-          <footer className="app-footer"><span>{footerLabel} <b>·</b> {branding.copyright}</span><span>{activeAssignment ? `TUGAS AKTIF HINGGA ${new Date(activeAssignment.ends_at).toLocaleString("id-ID")}` : "AKSES TERVERIFIKASI"}</span></footer>
+          <footer className="app-footer"><span>{footerLabel} <b>·</b> {branding.copyright}</span><span>{activeAssignment ? `Jaga berakhir ${new Date(activeAssignment.ends_at).toLocaleString("id-ID")}` : unitName}</span></footer>
         </div>
 
         <nav className="mobile-bottom-nav" aria-label="Navigasi cepat">
           {items.slice(0, 4).map((item) => {
             const Icon = item.icon;
             const active = activeSection === item.key;
-            return <Link key={item.key} href={navigateTo(item.key)} className={active ? "active" : ""} aria-current={active ? "page" : undefined}><Icon size={19} /><span>{item.label}</span></Link>;
+            return <Link key={item.key} href={navigateTo(item.key)} onClick={closeNavigation} className={active ? "active" : ""} aria-current={active ? "page" : undefined}><Icon size={19} /><span>{item.label}</span></Link>;
           })}
           <button onClick={() => setDrawerOpen(true)}><Menu size={19} /><span>Menu</span></button>
         </nav>

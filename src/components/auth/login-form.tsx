@@ -3,17 +3,23 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, LoaderCircle } from "lucide-react";
-import { accountRoles, roleLabels, type AccountRole } from "@/lib/auth/roles";
+import { type LoginRole } from "@/lib/auth/roles";
 
-const identifierLabels: Record<AccountRole, string> = {
-  admin: "NRP admin",
-  personnel: "NRP",
+const loginRoles: LoginRole[] = ["staff", "family"];
+
+const loginRoleLabels: Record<LoginRole, string> = {
+  staff: "Personel",
+  family: "Kode akun keluarga",
+};
+
+const identifierLabels: Record<LoginRole, string> = {
+  staff: "NRP",
   family: "Kode akun keluarga",
 };
 
 export function LoginForm() {
   const router = useRouter();
-  const [role, setRole] = useState<AccountRole>("personnel");
+  const [role, setRole] = useState<LoginRole>("staff");
   const [identifier, setIdentifier] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -51,7 +57,7 @@ export function LoginForm() {
       <fieldset className="role-picker">
         <legend>Jenis akun</legend>
         <div className="role-options">
-          {accountRoles.map((option) => (
+          {loginRoles.map((option) => (
             <button
               key={option}
               type="button"
@@ -63,7 +69,7 @@ export function LoginForm() {
                 setError("");
               }}
             >
-              {roleLabels[option]}
+              {loginRoleLabels[option]}
             </button>
           ))}
         </div>
@@ -74,6 +80,7 @@ export function LoginForm() {
         id="identifier"
         className="text-input"
         type="text"
+        inputMode="numeric"
         autoComplete="username"
         autoCapitalize="none"
         autoCorrect="off"

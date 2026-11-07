@@ -47,7 +47,7 @@ export function MetricGrid({ metrics }: { metrics: Array<{ label: string; value:
   return <div className="metric-grid">{metrics.map((metric) => <article className={`metric-card tone-${metric.tone ?? "green"}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong>{metric.detail && <small>{metric.detail}</small>}</article>)}</div>;
 }
 
-export function DataTable({ rows, columns, emptyTitle = "Belum ada data", emptyDescription = "Data dari database akan muncul di sini.", renderActions }: { rows: DataRow[]; columns: DataColumn[]; emptyTitle?: string; emptyDescription?: string; renderActions?: (row: DataRow) => React.ReactNode }) {
+export function DataTable({ rows, columns, emptyTitle = "Belum ada catatan", emptyDescription = "Belum ada catatan untuk ditampilkan.", renderActions }: { rows: DataRow[]; columns: DataColumn[]; emptyTitle?: string; emptyDescription?: string; renderActions?: (row: DataRow) => React.ReactNode }) {
   if (!rows.length) return <EmptyState title={emptyTitle} description={emptyDescription} />;
 
   return (
