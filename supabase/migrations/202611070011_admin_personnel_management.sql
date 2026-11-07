@@ -152,7 +152,7 @@ begin
 end;
 $$;
 
-revoke all on function public.admin_update_personnel(uuid, uuid, uuid, text, text, text, text, text) from public, anon, authenticated;
+revoke all on function public.admin_update_personnel(uuid, uuid, uuid, text, text, text, text, text, text) from public, anon, authenticated;
 revoke all on function public.admin_update_family_account(uuid, uuid, text, uuid, text) from public, anon;
-grant execute on function public.admin_update_personnel(uuid, uuid, uuid, text, text, text, text, text) to service_role;
+grant execute on function public.admin_update_personnel(uuid, uuid, uuid, text, text, text, text, text, text) to service_role;
 grant execute on function public.admin_update_family_account(uuid, uuid, text, uuid, text) to authenticated, service_role;
