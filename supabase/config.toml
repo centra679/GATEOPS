@@ -1,0 +1,13 @@
+project_id = "gateops"
+
+[functions.auth-nrp-pin]
+verify_jwt = true
+
+[functions.provision-account]
+verify_jwt = true
+
+[functions.manage-account]
+verify_jwt = true
+
+[functions.bootstrap-admin]
+verify_jwt = false
