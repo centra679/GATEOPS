@@ -215,6 +215,45 @@ Semua operasi sensitif dipisahkan dari akses klien langsung. Ini termasuk:
 - pendaftaran tamu
 - penyimpanan dokumen privat
 
+## Dashboard dan fitur berdasarkan role
+
+Isi dashboard dan menu GateOps mengikuti role aktif serta cakupan satuan. Petugas jaga sementara adalah mode tugas tambahan untuk akun personel, bukan jenis akun terpisah.
+
+### Admin
+
+Dashboard admin menampilkan ringkasan:
+
+- Total personel dan total keluarga/Persit.
+- Total pengguna aktif.
+- Personel dan keluarga/Persit yang sedang di luar.
+- Rencana izin aktif.
+- Tamu yang masih berada di dalam.
+- Petugas jaga yang aktif.
+
+Shortcut dashboard mengarah ke pemantauan lokasi, riwayat keluar-masuk, dan laporan. Menu admin menyediakan pemantauan GPS; pengelolaan personel, keluarga/Persit, akun, keanggotaan, dan satuan; konfigurasi pos dan QR; pemantauan rencana izin dan pergerakan; pengelolaan kunjungan serta kendaraan; undangan dan penugasan jaga; laporan; audit log; notifikasi; dan pengaturan satuan termasuk branding white-label.
+
+Dashboard admin saat ini menampilkan delapan ringkasan di atas. Spesifikasi juga menetapkan jumlah personel dan keluarga/Persit yang sedang berada di dalam sebagai metrik terpisah; dua angka tersebut belum ditampilkan sebagai kartu pada dashboard.
+
+### Personel
+
+Dashboard personel menampilkan status perjalanan pribadi (di dalam atau di luar), jumlah rencana izin yang disetujui, serta jumlah riwayat perjalanan. Shortcut tersedia untuk membuat rencana izin, memindai QR, dan membuka riwayat pribadi.
+
+Menu personel mencakup profil, rencana izin, scan QR keluar/masuk, status perjalanan, riwayat pribadi, undangan tugas jaga, notifikasi, dan pengaturan akun. Jika personel memiliki penugasan jaga yang aktif, personel dapat beralih ke mode petugas jaga sementara. Personel tidak dapat melihat lokasi GPS pengguna lain.
+
+### Keluarga/Persit
+
+Dashboard keluarga/Persit menampilkan status perjalanan akun sendiri, jumlah rencana izin yang disetujui, dan jumlah riwayat pribadi. Shortcut tersedia untuk membuat rencana izin, scan QR, dan membuka riwayat.
+
+Menu keluarga/Persit mencakup profil, rencana izin, scan QR keluar/masuk, status perjalanan pribadi, riwayat pribadi, notifikasi, dan pengaturan akun. Akun keluarga/Persit tidak memiliki akses ke dashboard admin atau lokasi pengguna lain.
+
+### Petugas jaga sementara
+
+Dashboard mode jaga menampilkan jumlah kunjungan aktif yang ditangani, status assignment, dan identitas pos pada assignment. Shortcut mengarah ke pencatatan tamu dan daftar tamu yang masih berada di dalam.
+
+Menu mode jaga mencakup pencatatan tamu beserta data kendaraan, daftar kunjungan aktif, riwayat kunjungan, laporan tugas sendiri, profil personel, dan notifikasi. Pencatatan operasional hanya tersedia selama assignment masih aktif. Mode ini tidak memberikan akses ke dashboard admin, pemantauan GPS, pengelolaan akun/personel, QR, atau pengaturan sistem.
+
+Ringkasan dan daftar pada dashboard mengikuti hasil backend serta hak akses role dan satuan aktif. Dashboard tidak menampilkan data contoh atau data operasional tiruan.
+
 ## Fitur operasional
 
 ### Manajemen personel dan akun

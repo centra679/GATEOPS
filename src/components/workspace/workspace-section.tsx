@@ -3,13 +3,13 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { RefreshCw, Search, MapPin, ArrowUpRight, FileSpreadsheet, FileText, Fingerprint, QrCode, History } from "lucide-react";
+import { RefreshCw, Search, MapPin, ArrowUpRight, FileSpreadsheet, FileText, Fingerprint, QrCode, History, ShieldCheck } from "lucide-react";
 import ExcelJS from "exceljs";
 import jsPDF from "jspdf";
 import { OperationForm } from "@/components/workspace/operation-form";
 import { PrivateDocumentUpload } from "@/components/workspace/private-document-upload";
 import { DataTable, EmptyState, ErrorState, LoadingState, MetricGrid, Panel, SectionHeading, StatusTag, Toast, type DataColumn, type DataRow } from "@/components/workspace/data-display";
-import { useWorkspaceContext } from "@/components/workspace/app-shell";
+import { useWorkspaceContext, type BrandingConfig } from "@/components/workspace/app-shell";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { roleLabels, type AccountRole, type EffectiveRole } from "@/lib/auth/roles";
 import { getNavigation, getSectionLabel, type SectionKey } from "@/lib/gateops/navigation";
@@ -108,7 +108,7 @@ const columnsBySection: Partial<Record<SectionKey, DataColumn[]>> = {
 };
 
 export function WorkspaceSection({ section, inviteToken = "" }: { section: SectionKey; inviteToken?: string }) {
-  const { unitId, unitName, userId, accountRole, effectiveRole, displayName } = useWorkspaceContext();
+  const { unitId, unitName, userId, accountRole, effectiveRole, displayName, branding } = useWorkspaceContext();
   const [supabase] = useState(createSupabaseBrowserClient);
   const [state, setState] = useState<SectionState>(emptyState);
   const [loading, setLoading] = useState(true);
@@ -212,7 +212,7 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
 
       {error && <ErrorState message={error} onRetry={() => setRevision((value) => value + 1)} />}
 
-      {section === "dashboard" && <Dashboard role={effectiveRole} accountRole={accountRole} summary={state.summary} unitName={unitName} />}
+      {section === "dashboard" && <Dashboard role={effectiveRole} accountRole={accountRole} summary={state.summary} unitName={unitName} branding={branding} />}
       {section === "guard-dashboard" && <GuardDashboard summary={state.summary} rows={state.rows} />}
       {section === "journey" && <JourneyStatus summary={state.summary} />}
       {section === "live-locations" && <LiveLocationView rows={state.rows} />}
@@ -220,6 +220,7 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
       {["visitors", "active-visits", "visit-history"].includes(section) && <PrivateDocumentUpload unitId={unitId} visits={state.rows} onComplete={showSuccess} />}
 
       {hasForm && <OperationForm
+        key={`${section}:${unitId}:${JSON.stringify(branding)}`}
         section={section}
         role={effectiveRole}
         choices={state.choices}
@@ -589,33 +590,81 @@ async function enrichVisits(supabase: ReturnType<typeof createSupabaseBrowserCli
   });
 }
 
-function Dashboard({ role, accountRole, summary, unitName }: { role: EffectiveRole; accountRole: AccountRole; summary: DataRow | null; unitName: string }) {
+function Dashboard({ role, accountRole, summary, unitName, branding }: { role: EffectiveRole; accountRole: AccountRole; summary: DataRow | null; unitName: string; branding: BrandingConfig }) {
+  const brandName = branding.whiteLabelEnabled || !branding.showGateopsBrand ? branding.name || unitName : "GateOps";
   if (role === "admin") {
     const metrics = [
       ["Total personel", summary?.total_personnel], ["Total keluarga", summary?.total_family], ["Pengguna aktif", summary?.active_users],
       ["Personel di luar", summary?.personnel_out], ["Keluarga di luar", summary?.family_out], ["Izin berjalan", summary?.active_plans],
       ["Tamu di dalam", summary?.active_visitors], ["Petugas jaga aktif", summary?.active_guards],
     ].map(([label, value]) => ({ label: String(label), value: typeof value === "number" ? value : "—" }));
-    return <><MetricGrid metrics={metrics} /><Panel title={`Cakupan ${unitName}`} description="Angka berasal dari RPC dashboard dan mengikuti hak akses satuan."><div className="dashboard-shortcuts"><Shortcut href="/app/live-locations" icon={<MapPin size={17} />} label="Pantau lokasi" /><Shortcut href="/app/movements" icon={<ArrowUpRight size={17} />} label="Riwayat keluar-masuk" /><Shortcut href="/app/reports" icon={<FileText size={17} />} label="Laporan tugas" /></div></Panel></>;
+    return <>
+      <div className="dashboard-hero-shell">
+        <div className="dashboard-hero-copy">
+          <span className="dashboard-hero-badge">{branding.whiteLabelEnabled ? "WHITE LABEL" : "GATEOPS PLATFORM"} • {unitName.toUpperCase()}</span>
+          <h2>Operasional satuan dalam satu kontrol terpusat</h2>
+          <p>{branding.tagline}. Operasional satuan, akses personel, dan aktivitas pos dalam satu workspace.</p>
+        </div>
+        <div className="dashboard-hero-brand">
+          <div className="dashboard-brand-mark"><ShieldCheck size={20} /></div>
+          <div>
+            <strong>{brandName}</strong>
+            <span>{branding.showGateopsBrand ? "Powered by GateOps" : branding.tagline}</span>
+          </div>
+        </div>
+      </div>
+      <MetricGrid metrics={metrics} />
+      <Panel title={`Cakupan ${unitName}`} description="Angka berasal dari RPC dashboard dan mengikuti hak akses satuan."><div className="dashboard-shortcuts"><Shortcut href="/app/live-locations" icon={<MapPin size={17} />} label="Pantau lokasi" /><Shortcut href="/app/movements" icon={<ArrowUpRight size={17} />} label="Riwayat keluar-masuk" /><Shortcut href="/app/reports" icon={<FileText size={17} />} label="Laporan tugas" /></div></Panel>
+    </>;
   }
 
   if (role === "temporary_guard") {
     const assignment = asRow(summary?.assignment);
-    return <><MetricGrid metrics={[
-      { label: "Penugasan", value: assignment ? "Aktif" : "—", detail: assignment ? `Berakhir ${new Date(String(assignment.ends_at)).toLocaleString("id-ID")}` : "Tidak ada assignment aktif" },
-      { label: "Tamu aktif", value: typeof summary?.active_visitors === "number" ? summary.active_visitors : "—" },
-    ]} /><Panel title="Tugas berjalan" description="Status diverifikasi ulang oleh backend pada setiap tindakan."><div className="dashboard-shortcuts"><Shortcut href="/app/visitors" icon={<Fingerprint size={17} />} label="Catat tamu" /><Shortcut href="/app/active-visits" icon={<UsersRoundIcon />} label="Tamu di dalam" /><Shortcut href="/app/visit-history" icon={<HistoryIcon />} label="Riwayat kunjungan" /></div></Panel></>;
+    return <>
+      <div className="dashboard-hero-shell compact">
+        <div className="dashboard-hero-copy">
+          <span className="dashboard-hero-badge">{branding.whiteLabelEnabled ? "WHITE LABEL" : "GATEOPS PLATFORM"} • JAGA</span>
+          <h2>Mode penugasan aktif Anda</h2>
+          <p>{branding.tagline}. Informasi tugas dan kunjungan mengikuti cakupan satuan aktif.</p>
+        </div>
+        <div className="dashboard-hero-brand">
+          <div className="dashboard-brand-mark"><ShieldCheck size={20} /></div>
+          <div>
+            <strong>{brandName}</strong>
+            <span>{branding.showGateopsBrand ? "Powered by GateOps" : branding.tagline}</span>
+          </div>
+        </div>
+      </div>
+      <MetricGrid metrics={[
+        { label: "Penugasan", value: assignment ? "Aktif" : "—", detail: assignment ? `Berakhir ${new Date(String(assignment.ends_at)).toLocaleString("id-ID")}` : "Tidak ada assignment aktif" },
+        { label: "Tamu aktif", value: typeof summary?.active_visitors === "number" ? summary.active_visitors : "—" },
+      ]} /><Panel title="Tugas berjalan" description="Status diverifikasi ulang oleh backend pada setiap tindakan."><div className="dashboard-shortcuts"><Shortcut href="/app/visitors" icon={<Fingerprint size={17} />} label="Catat tamu" /><Shortcut href="/app/active-visits" icon={<UsersRoundIcon />} label="Tamu di dalam" /><Shortcut href="/app/visit-history" icon={<HistoryIcon />} label="Riwayat kunjungan" /></div></Panel></>;
   }
 
   const active = asRow(summary?.active_session);
   const plans = asRows(summary?.plans);
   const approvedPlans = plans.filter((plan) => plan.status === "approved").length;
   const roleLabel = roleLabels[accountRole];
-  return <><MetricGrid metrics={[
-    { label: "Status perjalanan", value: active ? "Di luar" : "Di dalam", tone: active ? "amber" : "green" },
-    { label: "Rencana disetujui", value: approvedPlans },
-    { label: "Riwayat perjalanan", value: asRows(summary?.history).length },
-  ]} /><Panel title={`Aktivitas ${roleLabel}`} description="Informasi pribadi hanya diambil untuk akun yang sedang masuk."><div className="dashboard-shortcuts"><Shortcut href="/app/plans" icon={<ClipboardIcon />} label="Rencana izin" /><Shortcut href="/app/scan" icon={<QrIcon />} label="Scan QR" /><Shortcut href="/app/history" icon={<HistoryIcon />} label="Riwayat pribadi" /></div></Panel></>;
+  return <>
+    <div className="dashboard-hero-shell compact">
+      <div className="dashboard-hero-copy">
+        <span className="dashboard-hero-badge">{branding.whiteLabelEnabled ? "WHITE LABEL" : "GATEOPS PLATFORM"} • {unitName.toUpperCase()}</span>
+        <h2>Selamat datang di {brandName}</h2>
+        <p>{branding.tagline}. Informasi operasional ditampilkan sesuai peran dan satuan aktif Anda.</p>
+      </div>
+      <div className="dashboard-hero-brand">
+        <div className="dashboard-brand-mark"><ShieldCheck size={20} /></div>
+        <div>
+          <strong>{brandName}</strong>
+          <span>{branding.showGateopsBrand ? "GateOps Platform" : branding.tagline}</span>
+        </div>
+      </div>
+    </div>
+    <MetricGrid metrics={[
+      { label: "Status perjalanan", value: active ? "Di luar" : "Di dalam", tone: active ? "amber" : "green" },
+      { label: "Rencana disetujui", value: approvedPlans },
+      { label: "Riwayat perjalanan", value: asRows(summary?.history).length },
+    ]} /><Panel title={`Aktivitas ${roleLabel}`} description="Informasi pribadi hanya diambil untuk akun yang sedang masuk."><div className="dashboard-shortcuts"><Shortcut href="/app/plans" icon={<ClipboardIcon />} label="Rencana izin" /><Shortcut href="/app/scan" icon={<QrIcon />} label="Scan QR" /><Shortcut href="/app/history" icon={<HistoryIcon />} label="Riwayat pribadi" /></div></Panel></>;
 }
 
 function GuardDashboard({ summary, rows }: { summary: DataRow | null; rows: DataRow[] }) {

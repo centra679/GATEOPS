@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ArrowRight, LoaderCircle, QrCode } from "lucide-react";
+import { ArrowRight, LoaderCircle, QrCode, ShieldCheck } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useWorkspaceContext } from "@/components/workspace/app-shell";
@@ -23,12 +23,20 @@ type Props = {
 
 export function OperationForm({ section, role, choices = {}, profileName = "", inviteToken = "", onComplete }: Props) {
   const [supabase] = useState(createSupabaseBrowserClient);
-  const { unitId, userId, unitName, activeAssignment } = useWorkspaceContext();
+  const { unitId, userId, unitName, activeAssignment, branding } = useWorkspaceContext();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [qrToken, setQrToken] = useState("");
   const [issuedInvite, setIssuedInvite] = useState("");
   const [scanToken, setScanToken] = useState("");
+  const [brandingDraft, setBrandingDraft] = useState(() => ({
+    name: branding.name || unitName,
+    tagline: branding.tagline,
+    copyright: branding.copyright,
+    accentColor: branding.accentColor,
+    whiteLabelEnabled: branding.whiteLabelEnabled,
+    showGateopsBrand: branding.showGateopsBrand,
+  }));
 
   function value(data: FormData, key: string) {
     return String(data.get(key) ?? "").trim();
@@ -209,15 +217,43 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
         formElement.reset();
         onComplete("Kunjungan tamu tercatat.");
       } else if (section === "settings") {
-        let settingValue: unknown;
-        try { settingValue = JSON.parse(value(form, "setting_value")); } catch { throw new Error("Nilai pengaturan harus berupa JSON yang valid."); }
-        const { error: rpcError } = await supabase.rpc("admin_manage_setting", {
-          p_unit_id: unitId,
-          p_setting_key: value(form, "setting_key"),
-          p_setting_value: settingValue,
-          p_reason: value(form, "reason"),
-        });
-        if (rpcError) throw rpcError;
+        const reason = value(form, "reason");
+        const genericKey = value(form, "setting_key");
+        const brandSaveList: Array<{ key: string; value: unknown }> = [];
+        const brandName = value(form, "brand_name");
+        const brandTagline = value(form, "brand_tagline");
+        const brandCopyright = value(form, "brand_copyright");
+        const brandColor = value(form, "brand_color");
+        const whiteLabelValue = value(form, "brand_white_label");
+        const showGateopsValue = value(form, "brand_show_gateops");
+
+        if (brandName) brandSaveList.push({ key: "unit.brand.name", value: brandName });
+        if (brandTagline) brandSaveList.push({ key: "unit.brand.tagline", value: brandTagline });
+        if (brandCopyright) brandSaveList.push({ key: "unit.brand.copyright", value: brandCopyright });
+        if (brandColor) brandSaveList.push({ key: "unit.brand.accent_color", value: brandColor });
+        if (whiteLabelValue) brandSaveList.push({ key: "unit.brand.white_label_enabled", value: whiteLabelValue === "true" });
+        if (showGateopsValue) brandSaveList.push({ key: "unit.brand.show_gateops_brand", value: showGateopsValue === "true" });
+
+        if (!genericKey && brandSaveList.length === 0) throw new Error("Pilih minimal salah satu pengaturan branding atau masukkan kunci pengaturan khusus.");
+
+        if (genericKey) {
+          const genericRaw = value(form, "setting_value");
+          if (!genericRaw) throw new Error("Nilai JSON umum tidak boleh kosong.");
+          let parsedGenericValue: unknown;
+          try { parsedGenericValue = JSON.parse(genericRaw); } catch { throw new Error("Nilai JSON umum harus valid."); }
+          brandSaveList.push({ key: genericKey, value: parsedGenericValue });
+        }
+
+        for (const item of brandSaveList) {
+          const { error: rpcError } = await supabase.rpc("admin_manage_setting", {
+            p_unit_id: unitId,
+            p_setting_key: item.key,
+            p_setting_value: item.value,
+            p_reason: reason,
+          });
+          if (rpcError) throw rpcError;
+        }
+        window.dispatchEvent(new Event("gateops:branding-updated"));
         onComplete("Pengaturan satuan diperbarui.");
       }
     } catch (caught) {
@@ -348,12 +384,23 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
   </form></Panel>;
 
   if (section === "settings") return role === "admin"
-    ? <Panel title="Pengaturan satuan" description="Nilai disimpan sebagai JSON dan setiap perubahan diaudit."><form className="operation-form" onSubmit={handleSubmit}>
-      <Field label="Kunci pengaturan" name="setting_key" pattern="[a-z][a-z0-9_.-]{1,80}" maxLength={81} required />
-      <TextArea label="Nilai JSON" name="setting_value" defaultValue="{}" maxLength={16000} required />
+    ? <Panel title="Branding & White Label" description="Pengaturan berlaku untuk satuan aktif dan digunakan di seluruh workspace."><form className="operation-form form-grid" onSubmit={handleSubmit}>
+      <Field label="Nama satuan tampilan" name="brand_name" value={brandingDraft.name} onChange={(name) => setBrandingDraft((current) => ({ ...current, name }))} maxLength={120} />
+      <Field label="Tagline satuan" name="brand_tagline" value={brandingDraft.tagline} onChange={(tagline) => setBrandingDraft((current) => ({ ...current, tagline }))} maxLength={120} />
+      <Field label="Hak cipta" name="brand_copyright" value={brandingDraft.copyright} onChange={(copyright) => setBrandingDraft((current) => ({ ...current, copyright }))} maxLength={160} />
+      <Field label="Warna aksen" name="brand_color" type="color" value={brandingDraft.accentColor} onChange={(accentColor) => setBrandingDraft((current) => ({ ...current, accentColor }))} />
+      <SelectField label="Mode white label" name="brand_white_label" defaultValue={String(brandingDraft.whiteLabelEnabled)} options={[{ id: "true", label: "Aktif (branding satuan diutamakan)" }, { id: "false", label: "Nonaktif (GateOps diutamakan)" }]} optionValue="id" optionLabel={(row) => String(row.label)} onChange={(value) => setBrandingDraft((current) => ({ ...current, whiteLabelEnabled: value === "true" }))} />
+      <SelectField label="Tampilkan brand GateOps" name="brand_show_gateops" defaultValue={String(brandingDraft.showGateopsBrand)} options={[{ id: "true", label: "Ya, tampilkan identitas GateOps" }, { id: "false", label: "Sembunyikan brand GateOps" }]} optionValue="id" optionLabel={(row) => String(row.label)} onChange={(value) => setBrandingDraft((current) => ({ ...current, showGateopsBrand: value === "true" }))} />
+      <div className="branding-preview" style={{ borderColor: brandingDraft.accentColor }}>
+        <div className="branding-preview-mark" style={{ backgroundColor: brandingDraft.accentColor }}><ShieldCheck size={18} /></div>
+        <div className="branding-preview-copy"><strong>{brandingDraft.whiteLabelEnabled ? brandingDraft.name || unitName : "GateOps"}</strong><span>{brandingDraft.tagline}</span><small>{brandingDraft.copyright}</small></div>
+        {brandingDraft.showGateopsBrand && <span className="brand-badge">GateOps</span>}
+      </div>
+      <Field label="Kunci pengaturan khusus" name="setting_key" placeholder="Contoh: unit.brand.name" maxLength={81} />
+      <TextArea label="Nilai JSON umum" name="setting_value" placeholder="Isi jika menyimpan kunci khusus" maxLength={16000} />
       <TextArea label="Alasan perubahan" name="reason" maxLength={1000} required />
       <FormFeedback error={error} />
-      <SubmitButton pending={pending} label="Simpan pengaturan" />
+      <SubmitButton pending={pending} label="Simpan branding" />
     </form></Panel>
     : <Panel title="Pengaturan akun"><p className="quiet-copy">Pengaturan akun yang dapat diubah saat ini terbatas pada nama profil. PIN dapat diganti melalui kebijakan autentikasi yang dikelola administrator.</p></Panel>;
 
@@ -378,12 +425,12 @@ function Field({ label, name, type = "text", placeholder, required = false, defa
   return <label className="form-field"><span>{label}{required && <i> *</i>}</span><input name={name} type={type} placeholder={placeholder} required={required} defaultValue={defaultValue} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} {...attributes} /></label>;
 }
 
-function TextArea({ label, name, required = false, defaultValue, maxLength }: { label: string; name: string; required?: boolean; defaultValue?: string; maxLength?: number }) {
-  return <label className="form-field form-field-wide"><span>{label}{required && <i> *</i>}</span><textarea name={name} required={required} defaultValue={defaultValue} maxLength={maxLength} rows={3} /></label>;
+function TextArea({ label, name, required = false, defaultValue, maxLength, placeholder }: { label: string; name: string; required?: boolean; defaultValue?: string; maxLength?: number; placeholder?: string }) {
+  return <label className="form-field form-field-wide"><span>{label}{required && <i> *</i>}</span><textarea name={name} required={required} defaultValue={defaultValue} maxLength={maxLength} placeholder={placeholder} rows={3} /></label>;
 }
 
-function SelectField({ label, name, options, optionValue, optionLabel, required = false }: { label: string; name: string; options: DataRow[]; optionValue: string; optionLabel: (row: DataRow) => string; required?: boolean }) {
-  return <label className="form-field"><span>{label}{required && <i> *</i>}</span><select name={name} required={required} defaultValue=""><option value="" disabled>Pilih...</option>{options.map((option) => <option key={String(option[optionValue])} value={String(option[optionValue])}>{optionLabel(option)}</option>)}</select></label>;
+function SelectField({ label, name, options, optionValue, optionLabel, required = false, defaultValue, onChange }: { label: string; name: string; options: DataRow[]; optionValue: string; optionLabel: (row: DataRow) => string; required?: boolean; defaultValue?: string; onChange?: (value: string) => void }) {
+  return <label className="form-field"><span>{label}{required && <i> *</i>}</span><select name={name} required={required} defaultValue={defaultValue ?? ""} onChange={onChange ? (event) => onChange(event.target.value) : undefined}><option value="" disabled>Pilih...</option>{options.map((option) => <option key={String(option[optionValue])} value={String(option[optionValue])}>{optionLabel(option)}</option>)}</select></label>;
 }
 
 function SubmitButton({ label, pending }: { label: string; pending: boolean }) {

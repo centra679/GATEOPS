@@ -49,6 +49,25 @@ export default async function HomePage() {
 
           <LoginForm />
 
+          <div className="feature-grid" aria-label="Fitur utama GateOps">
+            <div className="feature-card">
+              <span>Perjalanan</span>
+              <strong>Rencana izin otomatis</strong>
+            </div>
+            <div className="feature-card">
+              <span>Pengawasan</span>
+              <strong>GPS & QR terintegrasi</strong>
+            </div>
+            <div className="feature-card">
+              <span>Jaga</span>
+              <strong>Undangan tugas aman</strong>
+            </div>
+            <div className="feature-card">
+              <span>Audit</span>
+              <strong>Catatan aktivitas lengkap</strong>
+            </div>
+          </div>
+
           <div className="role-note">
             <span className="role-note-rule" />
             <p>Petugas jaga sementara masuk menggunakan akun Personel dan undangan tugas yang sah.</p>
