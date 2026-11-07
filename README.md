@@ -174,6 +174,7 @@ Deploy fungsi utama:
 supabase functions deploy auth-nrp-pin
 supabase functions deploy provision-account
 supabase functions deploy manage-account
+supabase functions deploy manage-personnel
 supabase functions deploy bootstrap-admin
 ```
 
@@ -225,14 +226,14 @@ Dashboard admin menampilkan ringkasan:
 
 - Total personel dan total keluarga/Persit.
 - Total pengguna aktif.
-- Personel dan keluarga/Persit yang sedang di luar.
+- Personel dan keluarga/Persit yang sedang di dalam maupun di luar.
 - Rencana izin aktif.
 - Tamu yang masih berada di dalam.
 - Petugas jaga yang aktif.
 
-Shortcut dashboard mengarah ke pemantauan lokasi, riwayat keluar-masuk, dan laporan. Menu admin menyediakan pemantauan GPS; pengelolaan personel, keluarga/Persit, akun, keanggotaan, dan satuan; konfigurasi pos dan QR; pemantauan rencana izin dan pergerakan; pengelolaan kunjungan serta kendaraan; undangan dan penugasan jaga; laporan; audit log; notifikasi; dan pengaturan satuan termasuk branding white-label.
+Shortcut dashboard mengarah ke pemantauan lokasi, riwayat keluar-masuk, dan laporan. Menu admin menyediakan pemantauan GPS; pembuatan dan pembaruan data personel; pengelolaan akun keluarga/Persit dan relasi personel; status akun, sesi Auth, serta keanggotaan satuan; pembuatan pos penjagaan dan QR statis yang dapat dicetak sebagai label pos; pengaktifan, penonaktifan, dan pencabutan QR; pemantauan rencana izin dan pergerakan; penutupan sesi perjalanan bermasalah dengan alasan yang tercatat di audit log; pengelolaan kunjungan serta kendaraan; undangan dan penugasan jaga; laporan; audit log; notifikasi; dan pengaturan satuan termasuk branding white-label.
 
-Dashboard admin saat ini menampilkan delapan ringkasan di atas. Spesifikasi juga menetapkan jumlah personel dan keluarga/Persit yang sedang berada di dalam sebagai metrik terpisah; dua angka tersebut belum ditampilkan sebagai kartu pada dashboard.
+Dashboard admin menampilkan sepuluh metrik sesuai statistik yang ditetapkan spesifikasi.
 
 ### Personel
 
@@ -273,7 +274,10 @@ Ringkasan dan daftar pada dashboard mengikuti hasil backend serta hak akses role
 
 ### GPS dan lokasi
 - Rekaman lokasi yang dikaitkan dengan sesi keluar/masuk
-- History dan live location hanya dapat diakses melalui RPC yang terdokumentasi dan diaudit
+- Tracker mengikat pengiriman ke sesi lokasi aktif dan mencoba ulang hingga 20 titik sementara saat koneksi pulih
+- Admin dapat membuka jejak hingga 500 titik lokasi per pengguna melalui RPC yang memvalidasi cakupan satuan dan mencatat akses pada audit log
+- Dashboard membedakan lokasi aktif, tidak tersedia, dan terakhir terdeteksi bila pembaruan lebih dari dua menit
+- Validasi server membatasi rentang koordinat, akurasi nonnegatif, sesi pemilik yang aktif, dan timestamp yang tidak lebih dari lima menit di masa depan
 
 ### Jaga dan undangan sementara
 - Undangan jaga dibuat untuk personel yang aktif
@@ -329,8 +333,10 @@ Beberapa prinsip keamanan yang harus dipatuhi:
 
 Beberapa elemen bersifat pembatasan desain yang disadari dan tetap sesuai spesifikasi:
 
-- GPS browser tidak menjamin pembaruan di latar belakang sepenuhnya
-- PDF, Excel, push notification, dan UI modul khusus mungkin memerlukan pengerjaan lanjutan sesuai kebutuhan produk
+- GPS browser tidak menjamin pembaruan di latar belakang. Antrean offline hanya tersimpan di memori browser dan dapat hilang jika halaman ditutup
+- Spesifikasi belum menentukan masa retensi data GPS; penghapusan otomatis belum diaktifkan sampai durasi retensi ditetapkan
+- Ekspor PDF dan Excel tersedia untuk laporan, riwayat perjalanan, pergerakan, kunjungan, dan kendaraan. Filter tanggal, petugas/NRP/pos, jenis pengguna, status perjalanan, serta status kunjungan tersedia pada tabel yang memiliki data terkait; pembuat laporan gabungan lintas domain belum tersedia
+- Daftar notifikasi in-app diperbarui melalui Supabase Realtime; push notification browser dan pembaruan realtime modul lain belum diimplementasikan
 - semua komponen backend dan database harus sudah dideploy ke project Supabase aktif sebelum aplikasi benar-benar digunakan untuk operasi produksi
 
 ## Panduan troubleshooting

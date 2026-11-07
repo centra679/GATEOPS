@@ -9,5 +9,8 @@ verify_jwt = true
 [functions.manage-account]
 verify_jwt = true
 
+[functions.manage-personnel]
+verify_jwt = true
+
 [functions.bootstrap-admin]
 verify_jwt = false

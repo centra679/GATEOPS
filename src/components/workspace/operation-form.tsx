@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ArrowRight, LoaderCircle, QrCode, ShieldCheck } from "lucide-react";
+import { ArrowRight, LoaderCircle, Printer, ShieldCheck } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useWorkspaceContext } from "@/components/workspace/app-shell";
@@ -10,7 +10,7 @@ import { QrScanner } from "@/components/workspace/qr-scanner";
 import type { SectionKey } from "@/lib/gateops/navigation";
 import type { EffectiveRole } from "@/lib/auth/roles";
 
-type Choices = { personnel?: DataRow[]; posts?: DataRow[]; accounts?: DataRow[]; assignments?: DataRow[]; visits?: DataRow[] };
+type Choices = { personnel?: DataRow[]; families?: DataRow[]; posts?: DataRow[]; qr?: DataRow[]; accounts?: DataRow[]; assignments?: DataRow[]; visits?: DataRow[] };
 
 type Props = {
   section: SectionKey;
@@ -26,9 +26,17 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
   const { unitId, userId, unitName, activeAssignment, branding } = useWorkspaceContext();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [qrToken, setQrToken] = useState("");
+  const [issuedQr, setIssuedQr] = useState<{ token: string; id: string; postName: string } | null>(null);
   const [issuedInvite, setIssuedInvite] = useState("");
   const [scanToken, setScanToken] = useState("");
+  const [qrAction, setQrAction] = useState("create");
+  const [qrPostId, setQrPostId] = useState("");
+  const [editAccountId, setEditAccountId] = useState("");
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editNrp, setEditNrp] = useState("");
+  const [editRank, setEditRank] = useState("");
+  const [editPosition, setEditPosition] = useState("");
+  const [editRelatedPersonnelId, setEditRelatedPersonnelId] = useState("");
   const [brandingDraft, setBrandingDraft] = useState(() => ({
     name: branding.name || unitName,
     tagline: branding.tagline,
@@ -40,6 +48,17 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
 
   function value(data: FormData, key: string) {
     return String(data.get(key) ?? "").trim();
+  }
+
+  function selectAccountForEdit(accountId: string) {
+    setEditAccountId(accountId);
+    const accounts = section === "personnel" ? choices.personnel : choices.families;
+    const selected = accounts?.find((account) => String(account.id) === accountId);
+    setEditDisplayName(String(selected?.display_name ?? ""));
+    setEditNrp(String(selected?.nrp ?? ""));
+    setEditRank(String(selected?.rank ?? ""));
+    setEditPosition(String(selected?.position ?? ""));
+    setEditRelatedPersonnelId(String(selected?.related_personnel_id ?? ""));
   }
 
   async function submitScan(token: string) {
@@ -102,6 +121,34 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
         if (updateError) throw updateError;
         onComplete("Profil berhasil diperbarui.");
       } else if (section === "personnel" || section === "family") {
+        if (value(form, "action") === "update") {
+          if (section === "personnel") {
+            const { error: invokeError } = await supabase.functions.invoke("manage-personnel", {
+              body: {
+                userId: value(form, "account_user_id"),
+                unitId,
+                nrp: value(form, "nrp"),
+                displayName: value(form, "display_name"),
+                rank: value(form, "rank"),
+                position: value(form, "position"),
+                reason: value(form, "reason"),
+              },
+            });
+            if (invokeError) throw invokeError;
+            onComplete("Data personel dan identitas NRP berhasil diperbarui.");
+          } else {
+            const { error: rpcError } = await supabase.rpc("admin_update_family_account", {
+              p_unit_id: unitId,
+              p_family_user_id: value(form, "account_user_id"),
+              p_display_name: value(form, "display_name"),
+              p_related_personnel_id: value(form, "related_personnel_id"),
+              p_reason: value(form, "reason"),
+            });
+            if (rpcError) throw rpcError;
+            onComplete("Profil dan relasi akun keluarga berhasil diperbarui.");
+          }
+          return;
+        }
         const body = {
           role: section === "personnel" ? "personnel" : "family",
           identifier: value(form, section === "personnel" ? "nrp" : "family_code"),
@@ -163,6 +210,7 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
         onComplete(action === "create" ? "Pos berhasil dibuat." : "Data pos diperbarui.");
       } else if (section === "qr") {
         const action = value(form, "action") || "create";
+        setIssuedQr(null);
         const { data, error: rpcError } = await supabase.rpc("admin_manage_qr", {
           p_action: action,
           p_post_id: value(form, "post_id"),
@@ -170,8 +218,12 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
           p_reason: value(form, "reason"),
         });
         if (rpcError) throw rpcError;
-        const result = data as { token?: string } | null;
-        setQrToken(result?.token ?? "");
+        const result = data as { id?: string; token?: string } | null;
+        if (action === "create") {
+          if (!result?.token || !result.id) throw new Error("Token atau identitas QR tidak diterima dari server.");
+          const selectedPost = choices.posts?.find((post) => String(post.id) === value(form, "post_id"));
+          setIssuedQr({ token: result.token, id: result.id, postName: String(selectedPost?.name ?? "Pos") });
+        }
         onComplete(action === "create" ? "QR dibuat. Token hanya tersedia pada sesi ini." : "Status QR diperbarui.");
       } else if (section === "guards") {
         const startsAt = value(form, "starts_at");
@@ -291,21 +343,39 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
     <SubmitButton pending={pending} label="Simpan profil" />
   </form></Panel>;
 
-  if (section === "personnel" || section === "family") return <Panel title={section === "personnel" ? "Tambah personel" : "Tambah akun keluarga"} description="Akun dibuat oleh Supabase Auth. PIN tidak disimpan sebagai teks biasa."><form className="operation-form form-grid" onSubmit={handleSubmit}>
-    {section === "personnel" ? <>
-      <Field label="NRP" name="nrp" inputMode="numeric" pattern="[0-9]{1,20}" maxLength={20} required />
-      <Field label="Pangkat" name="rank" maxLength={80} />
-      <Field label="Jabatan" name="position" maxLength={120} />
-    </> : <>
-      <Field label="Kode akun keluarga" name="family_code" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" maxLength={64} required />
-      <SelectField label="NRP personel penghubung" name="related_personnel_nrp" options={choices.personnel ?? []} optionValue="nrp" optionLabel={(row) => `${String(row.nrp ?? "")} · ${String(row.display_name ?? "Personel")}`} required />
-    </>}
-    <Field label="Nama lengkap" name="display_name" maxLength={160} required />
-    <Field label="PIN (6-72 digit)" name="pin" type="password" inputMode="numeric" pattern="[0-9]{6,72}" minLength={6} maxLength={72} required />
-    <TextArea label="Alasan administrasi" name="reason" maxLength={1000} required />
-    <FormFeedback error={error} />
-    <SubmitButton pending={pending} label="Buat akun" />
-  </form></Panel>;
+  if (section === "personnel" || section === "family") return <>
+    <Panel title={section === "personnel" ? "Tambah personel" : "Tambah akun keluarga"} description="Akun dibuat oleh Supabase Auth. PIN tidak disimpan sebagai teks biasa."><form className="operation-form form-grid" onSubmit={handleSubmit}>
+      <input type="hidden" name="action" value="create" />
+      {section === "personnel" ? <>
+        <Field label="NRP" name="nrp" inputMode="numeric" pattern="[0-9]{1,20}" maxLength={20} required />
+        <Field label="Pangkat" name="rank" maxLength={80} />
+        <Field label="Jabatan" name="position" maxLength={120} />
+      </> : <>
+        <Field label="Kode akun keluarga" name="family_code" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" maxLength={64} required />
+        <SelectField label="NRP personel penghubung" name="related_personnel_nrp" options={choices.personnel ?? []} optionValue="nrp" optionLabel={(row) => `${String(row.nrp ?? "")} · ${String(row.display_name ?? "Personel")}`} required />
+      </>}
+      <Field label="Nama lengkap" name="display_name" maxLength={160} required />
+      <Field label="PIN (6-72 digit)" name="pin" type="password" inputMode="numeric" pattern="[0-9]{6,72}" minLength={6} maxLength={72} required />
+      <TextArea label="Alasan administrasi" name="reason" maxLength={1000} required />
+      <FormFeedback error={error} />
+      <SubmitButton pending={pending} label="Buat akun" />
+    </form></Panel>
+    <Panel title={section === "personnel" ? "Ubah data personel" : "Ubah akun keluarga"} description={section === "personnel" ? "Perubahan NRP disinkronkan dengan identitas login dan dicatat pada audit log." : "Nama dan personel penghubung dapat diubah; kode login keluarga tetap."}>
+      <form className="operation-form form-grid" onSubmit={handleSubmit}>
+        <input type="hidden" name="action" value="update" />
+        <SelectField label={section === "personnel" ? "Personel" : "Akun keluarga"} name="account_user_id" value={editAccountId} onChange={selectAccountForEdit} options={section === "personnel" ? choices.personnel ?? [] : choices.families ?? []} optionValue="id" optionLabel={(row) => section === "personnel" ? `${String(row.nrp ?? "")} · ${String(row.display_name ?? "Personel")}` : `${String(row.family_code ?? "")} · ${String(row.display_name ?? "Keluarga")}`} required />
+        <Field label="Nama lengkap" name="display_name" value={editDisplayName} onChange={setEditDisplayName} maxLength={160} required />
+        {section === "personnel" ? <>
+          <Field label="NRP" name="nrp" value={editNrp} onChange={setEditNrp} inputMode="numeric" pattern="[0-9]{1,20}" maxLength={20} required />
+          <Field label="Pangkat" name="rank" value={editRank} onChange={setEditRank} maxLength={80} />
+          <Field label="Jabatan" name="position" value={editPosition} onChange={setEditPosition} maxLength={120} />
+        </> : <SelectField label="Personel penghubung" name="related_personnel_id" value={editRelatedPersonnelId} onChange={setEditRelatedPersonnelId} options={choices.personnel ?? []} optionValue="id" optionLabel={(row) => `${String(row.nrp ?? "")} · ${String(row.display_name ?? "Personel")}`} required />}
+        <TextArea label="Alasan perubahan" name="reason" maxLength={1000} required />
+        <FormFeedback error={error} />
+        <SubmitButton pending={pending} label="Simpan perubahan" />
+      </form>
+    </Panel>
+  </>;
 
   if (section === "accounts") return <Panel title="Ubah status akun atau akses satuan" description="Status akun mencabut sesi Auth; status membership membatasi satuan ini."><form className="operation-form" onSubmit={handleSubmit}>
     <SelectField label="Akun" name="user_id" options={choices.accounts ?? []} optionValue="id" optionLabel={(row) => `${String(row.display_name ?? row.id)} · ${String(row.account_role ?? "")}`} required />
@@ -335,15 +405,28 @@ export function OperationForm({ section, role, choices = {}, profileName = "", i
     <SubmitButton pending={pending} label="Tambah pos" />
   </form></Panel>;
 
-  if (section === "qr") return <Panel title="Kelola QR Code" description="Token QR ditampilkan hanya sekali saat dibuat. Simpan dan cetak QR di lingkungan terkendali."><form className="operation-form" onSubmit={handleSubmit}>
-    <SelectField label="Aksi" name="action" options={[{ id: "create", label: "Buat QR baru" }, { id: "enable", label: "Aktifkan QR" }, { id: "disable", label: "Nonaktifkan QR" }, { id: "revoke", label: "Cabut QR" }]} optionValue="id" optionLabel={(row) => String(row.label)} required />
-    <SelectField label="Pos" name="post_id" options={choices.posts ?? []} optionValue="id" optionLabel={(row) => String(row.name ?? row.id)} required />
-    <Field label="ID QR (untuk mengubah status)" name="qr_id" placeholder="Kosongkan saat membuat QR" />
+  if (section === "qr") return <Panel title="Kelola QR Code" description="Token QR ditampilkan sekali saat dibuat. Cetak QR dan pasang di pos yang sesuai."><form className="operation-form" onSubmit={handleSubmit}>
+    <SelectField label="Aksi" name="action" defaultValue="create" onChange={(action) => { setQrAction(action); setIssuedQr(null); }} options={[{ id: "create", label: "Buat QR baru" }, { id: "enable", label: "Aktifkan QR" }, { id: "disable", label: "Nonaktifkan QR" }, { id: "revoke", label: "Cabut QR" }]} optionValue="id" optionLabel={(row) => String(row.label)} required />
+    <SelectField label="Pos" name="post_id" onChange={setQrPostId} options={choices.posts ?? []} optionValue="id" optionLabel={(row) => String(row.name ?? row.id)} required />
+    {qrAction !== "create" && <SelectField label="QR Code" name="qr_id" options={(choices.qr ?? []).filter((qr) => String(qr.post_id) === qrPostId)} optionValue="id" optionLabel={(qr) => `${String(qr.status ?? "")} · ${String(qr.id)}`} required />}
     <TextArea label="Alasan tindakan" name="reason" maxLength={1000} required />
     <FormFeedback error={error} />
     <SubmitButton pending={pending} label="Jalankan aksi QR" />
   </form>
-    {qrToken && <div className="issued-secret"><div><QrCode size={18} /><strong>Token QR baru</strong></div><code>{qrToken}</code><QRCodeSVG value={qrToken} size={180} level="Q" includeMargin /></div>}
+    {issuedQr && <div className="issued-secret qr-issued">
+      <div className="qr-print-sheet">
+        <p>{branding.name || unitName}</p>
+        <h2>{issuedQr.postName}</h2>
+        <QRCodeSVG value={issuedQr.token} size={280} level="Q" includeMargin />
+        <span>ID QR · {issuedQr.id}</span>
+        <small>QR statis pos penjagaan</small>
+      </div>
+      <div className="qr-print-actions">
+        <strong>QR baru · token hanya tersedia pada sesi ini</strong>
+        <code>{issuedQr.token}</code>
+        <button className="button-secondary button-compact" type="button" onClick={() => window.print()}><Printer size={15} /> Cetak QR pos</button>
+      </div>
+    </div>}
   </Panel>;
 
   if (section === "guards") return <Panel title="Undang petugas jaga" description="Undangan hanya dapat diterima akun Personel yang dituju."><form className="operation-form" onSubmit={handleSubmit}>
@@ -429,8 +512,8 @@ function TextArea({ label, name, required = false, defaultValue, maxLength, plac
   return <label className="form-field form-field-wide"><span>{label}{required && <i> *</i>}</span><textarea name={name} required={required} defaultValue={defaultValue} maxLength={maxLength} placeholder={placeholder} rows={3} /></label>;
 }
 
-function SelectField({ label, name, options, optionValue, optionLabel, required = false, defaultValue, onChange }: { label: string; name: string; options: DataRow[]; optionValue: string; optionLabel: (row: DataRow) => string; required?: boolean; defaultValue?: string; onChange?: (value: string) => void }) {
-  return <label className="form-field"><span>{label}{required && <i> *</i>}</span><select name={name} required={required} defaultValue={defaultValue ?? ""} onChange={onChange ? (event) => onChange(event.target.value) : undefined}><option value="" disabled>Pilih...</option>{options.map((option) => <option key={String(option[optionValue])} value={String(option[optionValue])}>{optionLabel(option)}</option>)}</select></label>;
+function SelectField({ label, name, options, optionValue, optionLabel, required = false, defaultValue, value, onChange }: { label: string; name: string; options: DataRow[]; optionValue: string; optionLabel: (row: DataRow) => string; required?: boolean; defaultValue?: string; value?: string; onChange?: (value: string) => void }) {
+  return <label className="form-field"><span>{label}{required && <i> *</i>}</span><select name={name} required={required} defaultValue={value === undefined ? defaultValue ?? "" : undefined} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined}><option value="" disabled>Pilih...</option>{options.map((option) => <option key={String(option[optionValue])} value={String(option[optionValue])}>{optionLabel(option)}</option>)}</select></label>;
 }
 
 function SubmitButton({ label, pending }: { label: string; pending: boolean }) {

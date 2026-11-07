@@ -18,16 +18,45 @@ const LiveLocationMap = dynamic(
   () => import("@/components/workspace/live-location-map").then((module) => module.LiveLocationMap),
   { ssr: false, loading: () => <div className="map-loading"><span className="loading-mark" />Memuat peta...</div> },
 );
+const LocationHistoryMap = dynamic(
+  () => import("@/components/workspace/live-location-map").then((module) => module.LocationHistoryMap),
+  { ssr: false, loading: () => <div className="map-loading"><span className="loading-mark" />Memuat jejak GPS...</div> },
+);
 
 type SectionState = {
   rows: DataRow[];
   summary: DataRow | null;
-  choices: { personnel: DataRow[]; posts: DataRow[]; accounts: DataRow[]; assignments: DataRow[]; visits: DataRow[] };
+  choices: { personnel: DataRow[]; families: DataRow[]; posts: DataRow[]; qr: DataRow[]; accounts: DataRow[]; assignments: DataRow[]; visits: DataRow[] };
 };
 
-const emptyState: SectionState = { rows: [], summary: null, choices: { personnel: [], posts: [], accounts: [], assignments: [], visits: [] } };
+const emptyState: SectionState = { rows: [], summary: null, choices: { personnel: [], families: [], posts: [], qr: [], accounts: [], assignments: [], visits: [] } };
 
 const personalSections = new Set<SectionKey>(["profile", "plans", "scan", "journey", "history", "guard-invites", "notifications", "settings"]);
+const dateFilterFields: Partial<Record<SectionKey, string>> = {
+  reports: "generated_at",
+  "guard-report": "generated_at",
+  history: "started_at",
+  movements: "started_at",
+  visitors: "checked_in_at",
+  "active-visits": "checked_in_at",
+  "visit-history": "checked_in_at",
+  vehicles: "created_at",
+};
+type TableFilter = { key: string; label: string; kind: "text" | "select" };
+const tableFilters: Partial<Record<SectionKey, TableFilter[]>> = {
+  reports: [{ key: "display_name", label: "Petugas", kind: "text" }, { key: "nrp", label: "NRP", kind: "text" }, { key: "post_name", label: "Pos", kind: "select" }],
+  "guard-report": [{ key: "display_name", label: "Petugas", kind: "text" }, { key: "nrp", label: "NRP", kind: "text" }, { key: "post_name", label: "Pos", kind: "select" }],
+  movements: [
+    { key: "display_name", label: "Nama", kind: "text" }, { key: "nrp", label: "NRP", kind: "text" },
+    { key: "family_code", label: "Kode keluarga", kind: "text" }, { key: "account_role", label: "Jenis pengguna", kind: "select" },
+    { key: "post_name", label: "Pos", kind: "select" }, { key: "status", label: "Status perjalanan", kind: "select" },
+  ],
+  history: [{ key: "destination", label: "Tujuan", kind: "text" }, { key: "status", label: "Status perjalanan", kind: "select" }],
+  visitors: [{ key: "visitor_name", label: "Nama tamu", kind: "text" }, { key: "post_name", label: "Pos", kind: "select" }, { key: "status", label: "Status tamu", kind: "select" }],
+  "active-visits": [{ key: "visitor_name", label: "Nama tamu", kind: "text" }, { key: "post_name", label: "Pos", kind: "select" }],
+  "visit-history": [{ key: "visitor_name", label: "Nama tamu", kind: "text" }, { key: "post_name", label: "Pos", kind: "select" }, { key: "status", label: "Status tamu", kind: "select" }],
+  vehicles: [{ key: "visitor_name", label: "Nama tamu", kind: "text" }, { key: "vehicle_type", label: "Jenis kendaraan", kind: "select" }],
+};
 
 const columnsBySection: Partial<Record<SectionKey, DataColumn[]>> = {
   personnel: [
@@ -54,6 +83,12 @@ const columnsBySection: Partial<Record<SectionKey, DataColumn[]>> = {
   plans: [
     { key: "departure_at", label: "Rencana keluar" }, { key: "planned_return_at", label: "Perkiraan kembali" },
     { key: "destination", label: "Tujuan" }, { key: "purpose", label: "Keperluan" }, { key: "status", label: "Status" },
+  ],
+  history: [
+    { key: "started_at", label: "Waktu keluar" }, { key: "ended_at", label: "Waktu kembali" },
+    { key: "destination", label: "Tujuan" }, { key: "purpose", label: "Keperluan" },
+    { key: "duration_minutes", label: "Durasi", format: (_value, row) => formatDuration(row.started_at, row.ended_at) },
+    { key: "status", label: "Status perjalanan" },
   ],
   movements: [
     { key: "display_name", label: "Pengguna" }, { key: "account_role", label: "Jenis" }, { key: "status", label: "Status" },
@@ -114,6 +149,9 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
+  const [criteriaFilters, setCriteriaFilters] = useState<Record<string, string>>({});
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [toast, setToast] = useState("");
   const [revision, setRevision] = useState(0);
 
@@ -137,12 +175,43 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
     return () => { active = false; if (interval) window.clearInterval(interval); };
   }, [supabase, section, unitId, userId, effectiveRole, accountRole, unitName, revision]);
 
+  useEffect(() => {
+    if (section !== "notifications") return;
+    const channel = supabase.channel(`notifications:${userId}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${userId}`,
+      }, () => setRevision((value) => value + 1))
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [section, supabase, userId]);
+
   const label = getSectionLabel(effectiveRole, section);
   const allowed = getNavigation(effectiveRole).some((item) => item.key === section)
     || (accountRole === "personnel" && personalSections.has(section));
   if (!allowed) return <><SectionHeading eyebrow={roleLabels[effectiveRole].toUpperCase()} title={label} /><Panel><EmptyState title="Menu tidak tersedia" description="Akses menu ini tidak diberikan untuk role aktif." /></Panel></>;
 
-  const visibleRows = state.rows.filter((row) => !filter || Object.values(row).some((value) => String(value ?? "").toLowerCase().includes(filter.toLowerCase())));
+  const dateField = dateFilterFields[section];
+  const activeFilters = (tableFilters[section] ?? []).filter((criterion) => state.rows.some((row) => row[criterion.key] !== null && row[criterion.key] !== undefined && String(row[criterion.key]) !== ""));
+  const fromTime = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+  const toTime = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+  const visibleRows = state.rows.filter((row) => {
+    const matchesText = !filter || Object.values(row).some((value) => String(value ?? "").toLowerCase().includes(filter.toLowerCase()));
+    if (!matchesText) return false;
+    const matchesCriteria = activeFilters.every((criterion) => {
+      const selectedValue = criteriaFilters[criterion.key] ?? "";
+      const rowValue = String(row[criterion.key] ?? "");
+      return !selectedValue || (criterion.kind === "text"
+        ? rowValue.toLowerCase().includes(selectedValue.toLowerCase())
+        : rowValue === selectedValue);
+    });
+    if (!matchesCriteria) return false;
+    if (!dateField || (fromTime === null && toTime === null)) return true;
+    const timestamp = typeof row[dateField] === "string" ? Date.parse(String(row[dateField])) : Number.NaN;
+    return Number.isFinite(timestamp) && (fromTime === null || timestamp >= fromTime) && (toTime === null || timestamp <= toTime);
+  });
   const columns = columnsBySection[section] ?? [];
 
   function showSuccess(message: string) {
@@ -154,12 +223,23 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
     try {
       await action();
       showSuccess(successMessage);
+      return true;
     } catch (caught) {
       setError(readError(caught));
+      return false;
     }
   }
 
   function rowActions(row: DataRow) {
+    if (section === "movements" && accountRole === "admin" && !row.ended_at) {
+      return <ReasonAction label="Tutup sesi" placeholder="Alasan penutupan admin" onSubmit={(reason) => runAction(async () => {
+        const { error: rpcError } = await supabase.rpc("admin_force_close_movement", {
+          p_movement_session_id: String(row.id),
+          p_reason: reason.trim(),
+        });
+        if (rpcError) throw rpcError;
+      }, "Sesi perjalanan ditutup dan dicatat pada audit log.")} />;
+    }
     if (section === "plans" && accountRole !== "admin" && row.status === "approved") {
       return <button className="row-action" onClick={() => runAction(async () => {
         const { error: rpcError } = await supabase.rpc("cancel_movement_plan", { p_plan_id: row.id, p_reason: "Dibatalkan oleh pemilik rencana" });
@@ -215,7 +295,7 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
       {section === "dashboard" && <Dashboard role={effectiveRole} accountRole={accountRole} summary={state.summary} unitName={unitName} branding={branding} />}
       {section === "guard-dashboard" && <GuardDashboard summary={state.summary} rows={state.rows} />}
       {section === "journey" && <JourneyStatus summary={state.summary} />}
-      {section === "live-locations" && <LiveLocationView rows={state.rows} />}
+      {section === "live-locations" && <LiveLocationView rows={state.rows} unitId={unitId} />}
       {section === "scan" && <ScanNotice />}
       {["visitors", "active-visits", "visit-history"].includes(section) && <PrivateDocumentUpload unitId={unitId} visits={state.rows} onComplete={showSuccess} />}
 
@@ -236,6 +316,16 @@ export function WorkspaceSection({ section, inviteToken = "" }: { section: Secti
       >
         <div className="table-toolbar">
           <label className="table-search"><Search size={16} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Cari dalam data" aria-label="Cari dalam data" /></label>
+          {dateField && <div className="table-date-filters">
+            <label><span>Dari</span><input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} aria-label="Tanggal mulai" /></label>
+            <label><span>Sampai</span><input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} aria-label="Tanggal akhir" /></label>
+          </div>}
+          {activeFilters.length > 0 && <div className="table-advanced-filters">{activeFilters.map((criterion) => {
+            const options = [...new Set(state.rows.map((row) => String(row[criterion.key] ?? "")).filter(Boolean))].sort((first, second) => first.localeCompare(second, "id"));
+            return <label className="table-advanced-filter" key={criterion.key}><span>{criterion.label}</span>{criterion.kind === "select"
+              ? <select value={criteriaFilters[criterion.key] ?? ""} onChange={(event) => setCriteriaFilters((current) => ({ ...current, [criterion.key]: event.target.value }))}><option value="">Semua</option>{options.map((option) => <option key={option} value={option}>{option.replaceAll("_", " ")}</option>)}</select>
+              : <input value={criteriaFilters[criterion.key] ?? ""} onChange={(event) => setCriteriaFilters((current) => ({ ...current, [criterion.key]: event.target.value }))} placeholder={`Cari ${criterion.label.toLowerCase()}`} />}</label>;
+          })}</div>}
         </div>
         {loading ? <LoadingState /> : <DataTable
           rows={visibleRows}
@@ -304,7 +394,10 @@ async function loadSectionData(
     if (error) throw error;
     result.summary = asRow(data);
     const status = asRow(data);
-    if (section === "history") result.rows = asRows(status?.history);
+    if (section === "history") result.rows = asRows(status?.history).map((session) => {
+      const plan = asRow(session.plan);
+      return { ...session, destination: plan?.destination, purpose: plan?.purpose };
+    });
     return result;
   }
 
@@ -348,8 +441,12 @@ async function loadSectionData(
     requireUnit();
     const people = await loadPeople(supabase, unitId, section);
     result.rows = people;
-    if (section === "family") result.choices.personnel = (await loadPeople(supabase, unitId, "personnel"))
-      .filter((row) => row.status === "active" && row.membership_status === "active");
+    if (section === "personnel") result.choices.personnel = people;
+    else {
+      result.choices.families = people;
+      result.choices.personnel = (await loadPeople(supabase, unitId, "personnel"))
+        .filter((row) => row.status === "active" && row.membership_status === "active");
+    }
     return result;
   }
 
@@ -388,23 +485,41 @@ async function loadSectionData(
       const names = new Map(postRows.map((row) => [String(row.id), String(row.name)]));
       result.rows = asRows(data).map((row) => ({ ...row, post_name: names.get(String(row.post_id)) ?? "" }));
     }
+    if (section === "qr") result.choices.qr = result.rows;
     return result;
   }
 
   if (section === "movements") {
     requireUnit();
-    const { data: movements, error } = await supabase.from("movement_sessions").select("id,user_id,unit_id,plan_id,status,started_at,ended_at").eq("unit_id", unitId).order("started_at", { ascending: false }).limit(300);
+    const { data: movements, error } = await supabase.from("movement_sessions").select("id,user_id,unit_id,plan_id,departure_post_id,status,started_at,ended_at").eq("unit_id", unitId).order("started_at", { ascending: false }).limit(300);
     if (error) throw error;
     const movementRows = asRows(movements);
     const userIds = [...new Set(movementRows.map((row) => String(row.user_id)))];
     const planIds = [...new Set(movementRows.map((row) => String(row.plan_id)))];
-    const [{ data: profiles }, { data: plans }] = await Promise.all([
+      const personnelIds = userIds;
+      const familyIds = userIds;
+      const postIds = [...new Set(movementRows.map((row) => String(row.departure_post_id ?? "")).filter(Boolean))];
+      const [{ data: profiles }, { data: plans }, { data: personnel }, { data: families }, { data: posts }] = await Promise.all([
       userIds.length ? supabase.from("profiles").select("id,display_name,account_role").in("id", userIds) : Promise.resolve({ data: [] }),
       planIds.length ? supabase.from("movement_plans").select("id,destination,purpose").in("id", planIds) : Promise.resolve({ data: [] }),
+        personnelIds.length ? supabase.from("personnel").select("id,nrp").in("id", personnelIds) : Promise.resolve({ data: [] }),
+        familyIds.length ? supabase.from("family_accounts").select("id,family_code").in("id", familyIds) : Promise.resolve({ data: [] }),
+        postIds.length ? supabase.from("posts").select("id,name").in("id", postIds) : Promise.resolve({ data: [] }),
     ]);
     const people = new Map(asRows(profiles).map((row) => [String(row.id), row]));
     const purposes = new Map(asRows(plans).map((row) => [String(row.id), row]));
-    result.rows = movementRows.map((row) => ({ ...row, movement_session_id: row.id, ...(people.get(String(row.user_id)) ?? {}), ...(purposes.get(String(row.plan_id)) ?? {}) }));
+    const nrps = new Map(asRows(personnel).map((row) => [String(row.id), row.nrp]));
+    const familyCodes = new Map(asRows(families).map((row) => [String(row.id), row.family_code]));
+    const postsById = new Map(asRows(posts).map((row) => [String(row.id), row.name]));
+    result.rows = movementRows.map((row) => ({
+      ...row,
+      movement_session_id: row.id,
+      ...(people.get(String(row.user_id)) ?? {}),
+      ...(purposes.get(String(row.plan_id)) ?? {}),
+      nrp: nrps.get(String(row.user_id)),
+      family_code: familyCodes.get(String(row.user_id)),
+      post_name: postsById.get(String(row.departure_post_id)),
+    }));
     return result;
   }
 
@@ -468,7 +583,7 @@ async function loadSectionData(
       ]);
       const personnelById = new Map(personnel.map((row) => [String(row.id), row]));
       const postsById = new Map(posts.map((row) => [String(row.id), row]));
-      result.choices.assignments = assignments.map((row) => ({ ...row, display_name: personnelById.get(String(row.personnel_user_id))?.display_name, post_name: postsById.get(String(row.post_id))?.name }));
+      result.choices.assignments = assignments.map((row) => ({ ...row, display_name: personnelById.get(String(row.personnel_user_id))?.display_name, nrp: personnelById.get(String(row.personnel_user_id))?.nrp, post_name: postsById.get(String(row.post_id))?.name }));
       result.rows = result.choices.assignments;
       if (section === "guards") {
         result.choices.personnel = personnel.filter((row) => row.status === "active" && row.membership_status === "active");
@@ -488,7 +603,7 @@ async function loadSectionData(
           const report = reportByAssignment.get(String(assignment.id));
           if (!report) return [];
           const payload = asRow(report.report_data) ?? {};
-          return [{ ...report, ...payload, post_name: payload.post_name ?? assignment.post_name, display_name: payload.personnel_name ?? assignment.display_name }];
+          return [{ ...report, ...payload, post_name: payload.post_name ?? assignment.post_name, display_name: payload.personnel_name ?? assignment.display_name, nrp: assignment.nrp }];
         });
       }
     }
@@ -595,7 +710,8 @@ function Dashboard({ role, accountRole, summary, unitName, branding }: { role: E
   if (role === "admin") {
     const metrics = [
       ["Total personel", summary?.total_personnel], ["Total keluarga", summary?.total_family], ["Pengguna aktif", summary?.active_users],
-      ["Personel di luar", summary?.personnel_out], ["Keluarga di luar", summary?.family_out], ["Izin berjalan", summary?.active_plans],
+      ["Personel di dalam", summary?.personnel_inside], ["Personel di luar", summary?.personnel_out],
+      ["Keluarga di dalam", summary?.family_inside], ["Keluarga di luar", summary?.family_out], ["Izin berjalan", summary?.active_plans],
       ["Tamu di dalam", summary?.active_visitors], ["Petugas jaga aktif", summary?.active_guards],
     ].map(([label, value]) => ({ label: String(label), value: typeof value === "number" ? value : "—" }));
     return <>
@@ -690,12 +806,68 @@ function JourneyStatus({ summary }: { summary: DataRow | null }) {
   </dl><Link className="button-primary" href="/app/scan"><QrCode size={16} /> Scan QR kepulangan</Link></div></Panel>;
 }
 
-function LiveLocationView({ rows }: { rows: DataRow[] }) {
+function LiveLocationView({ rows, unitId }: { rows: DataRow[]; unitId: string }) {
+  const [supabase] = useState(createSupabaseBrowserClient);
+  const [selectedLocation, setSelectedLocation] = useState<DataRow | null>(null);
+  const [historyRows, setHistoryRows] = useState<DataRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const locations = rows.map((row) => ({ ...row, latitude: numeric(row.latitude), longitude: numeric(row.longitude) }));
-  return <div className="location-layout"><Panel title="Peta lokasi" description="Posisi terakhir pengguna dengan sesi perjalanan aktif."><LiveLocationMap locations={locations} /></Panel><Panel title="Pembaruan terakhir" description="Akurasi dan waktu berasal dari data perangkat/server."><DataTable rows={rows} columns={[
-    { key: "display_name", label: "Pengguna" }, { key: "account_role", label: "Jenis" }, { key: "destination", label: "Tujuan" },
-    { key: "location_status", label: "GPS" }, { key: "accuracy_meters", label: "Akurasi (m)" }, { key: "received_at", label: "Diterima" },
-  ]} emptyTitle="Tidak ada pengguna di luar" emptyDescription="Lokasi muncul setelah transaksi keluar berhasil dan koordinat diterima." /></Panel></div>;
+
+  async function showHistory(location: DataRow) {
+    setSelectedLocation(location);
+    setHistoryRows([]);
+    setHistoryError("");
+    setHistoryLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("get_admin_location_history", {
+        p_unit_id: unitId,
+        p_user_id: String(location.user_id),
+        p_limit: 500,
+      });
+      if (error) throw error;
+      setHistoryRows(asRows(data));
+    } catch (caught) {
+      setHistoryError(readError(caught));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  return <>
+    <div className="location-layout">
+      <Panel title="Peta lokasi" description="Posisi terakhir pengguna dengan sesi perjalanan aktif."><LiveLocationMap locations={locations} /></Panel>
+      <Panel title="Pembaruan terakhir" description="Waktu pengambilan dan penerimaan lokasi dicatat terpisah."><DataTable rows={rows} columns={[
+        { key: "display_name", label: "Pengguna" }, { key: "account_role", label: "Jenis" }, { key: "nrp", label: "NRP" },
+        { key: "family_code", label: "Kode keluarga" }, { key: "started_at", label: "Waktu keluar" },
+        { key: "destination", label: "Tujuan" },
+        { key: "location_status", label: "Status GPS", format: (_value, row) => <StatusTag value={gpsDisplayStatus(row)} /> },
+        { key: "accuracy_meters", label: "Akurasi (m)" }, { key: "captured_at", label: "Diambil" }, { key: "received_at", label: "Diterima" },
+      ]} renderActions={(row) => <button className="row-action" type="button" disabled={historyLoading || !row.user_id} onClick={() => void showHistory(row)}><History size={14} /> Riwayat GPS</button>} emptyTitle="Tidak ada pengguna di luar" emptyDescription="Lokasi muncul setelah transaksi keluar berhasil dan koordinat diterima." /></Panel>
+    </div>
+    {selectedLocation && <Panel title={`Riwayat GPS · ${String(selectedLocation.display_name ?? "Pengguna")}`} description={`Keluar ${formatDate(selectedLocation.started_at)} · Tujuan ${String(selectedLocation.destination ?? "-")}`} action={<button className="text-action" onClick={() => { setSelectedLocation(null); setHistoryRows([]); setHistoryError(""); }}>Tutup</button>}>
+      {historyError ? <ErrorState message={historyError} onRetry={() => void showHistory(selectedLocation)} />
+        : historyLoading ? <LoadingState label="Memuat riwayat lokasi..." />
+          : <>{historyRows.length > 0 && <LocationHistoryMap points={historyRows} />}<DataTable rows={historyRows} columns={[
+            { key: "captured_at", label: "Waktu pengambilan" }, { key: "received_at", label: "Waktu diterima" },
+            { key: "latitude", label: "Latitude", format: (value) => formatCoordinate(value) },
+            { key: "longitude", label: "Longitude", format: (value) => formatCoordinate(value) },
+            { key: "accuracy_meters", label: "Akurasi (m)", format: (value) => typeof value === "number" ? Math.round(value) : "-" },
+          ]} emptyTitle="Belum ada titik GPS" emptyDescription="Sesi perjalanan tetap aktif meskipun perangkat belum mengirim koordinat." /> </>}
+    </Panel>}
+  </>;
+}
+
+function gpsDisplayStatus(row: DataRow) {
+  if (row.location_status !== "active") return String(row.location_status ?? "Tidak tersedia");
+  if (typeof row.received_at !== "string") return "Tidak tersedia";
+  const receivedAt = Date.parse(row.received_at);
+  return Number.isFinite(receivedAt) && Date.now() - receivedAt > 120_000 ? "Terakhir terdeteksi" : "Aktif";
+}
+
+function formatCoordinate(value: unknown) {
+  const coordinate = numeric(value);
+  return coordinate === null ? "-" : coordinate.toFixed(6);
 }
 
 function ScanNotice() {
@@ -720,14 +892,14 @@ function Shortcut({ href, icon, label }: { href: string; icon: React.ReactNode; 
   return <Link className="dashboard-shortcut" href={href}><span>{icon}</span><strong>{label}</strong><ArrowUpRight size={15} /></Link>;
 }
 
-function ReasonAction({ label, placeholder, onSubmit }: { label: string; placeholder: string; onSubmit: (reason: string) => Promise<void> }) {
+function ReasonAction({ label, placeholder, onSubmit }: { label: string; placeholder: string; onSubmit: (reason: string) => Promise<boolean | void> }) {
   const [reason, setReason] = useState("");
   const [pending, setPending] = useState(false);
   return <form className="row-reason-action" onSubmit={async (event) => {
     event.preventDefault();
     if (!reason.trim()) return;
     setPending(true);
-    try { await onSubmit(reason); setReason(""); } finally { setPending(false); }
+    try { if (await onSubmit(reason) !== false) setReason(""); } finally { setPending(false); }
   }}>
     <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={placeholder} aria-label={placeholder} maxLength={1000} required />
     <button className="row-action" type="submit" disabled={pending}>{pending ? "..." : label}</button>
@@ -825,6 +997,17 @@ function formatDate(value: unknown) {
   if (typeof value !== "string") return "-";
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? "-" : date.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatDuration(startedAt: unknown, endedAt: unknown) {
+  if (typeof startedAt !== "string") return "-";
+  const startTime = Date.parse(startedAt);
+  const endTime = typeof endedAt === "string" ? Date.parse(endedAt) : Date.now();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return "-";
+  const totalMinutes = Math.max(0, Math.floor((endTime - startTime) / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours} jam ${minutes} menit` : `${minutes} menit`;
 }
 
 function numeric(value: unknown): number | null {

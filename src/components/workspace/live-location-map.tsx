@@ -1,7 +1,8 @@
 "use client";
 
-import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
-import type { LatLngExpression } from "leaflet";
+import { useEffect } from "react";
+import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
+import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import type { DataRow } from "@/components/workspace/data-display";
 
 type Location = DataRow & {
@@ -46,4 +47,52 @@ export function LiveLocationMap({ locations }: { locations: Location[] }) {
       <div className="map-attribution-note">Peta © OpenStreetMap · koordinat mengikuti pembaruan terakhir perangkat</div>
     </div>
   );
+}
+
+type HistoryPoint = DataRow & {
+  id?: string;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  captured_at?: string | null;
+  accuracy_meters?: number | null;
+};
+
+export function LocationHistoryMap({ points }: { points: HistoryPoint[] }) {
+  const plotted = points.filter((point) => {
+    const latitude = Number(point.latitude);
+    const longitude = Number(point.longitude);
+    return Number.isFinite(latitude) && Number.isFinite(longitude);
+  });
+  if (!plotted.length) return <div className="map-empty">Belum ada koordinat untuk ditampilkan di peta.</div>;
+
+  const positions = plotted.map((point) => [Number(point.latitude), Number(point.longitude)] as LatLngExpression);
+  const start = plotted[0];
+  const latest = plotted[plotted.length - 1];
+
+  return <div className="live-map location-history-map" aria-label="Jejak riwayat GPS">
+    <MapContainer center={positions[positions.length - 1]} zoom={13} scrollWheelZoom className="live-map-canvas">
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      <FitHistoryBounds positions={positions} />
+      {positions.length > 1 && <Polyline positions={positions} pathOptions={{ color: "#193b30", weight: 4, opacity: 0.8 }} />}
+      <CircleMarker center={positions[0]} radius={7} pathOptions={{ color: "#fff", weight: 2, fillColor: "#557c47", fillOpacity: 1 }}>
+        <Popup>Titik awal · {start.captured_at ? new Date(start.captured_at).toLocaleString("id-ID") : "Waktu tidak tersedia"}</Popup>
+      </CircleMarker>
+      {plotted.length > 1 && <CircleMarker center={positions[positions.length - 1]} radius={8} pathOptions={{ color: "#fff", weight: 2, fillColor: "#b7443c", fillOpacity: 1 }}>
+        <Popup>Titik terakhir · {latest.captured_at ? new Date(latest.captured_at).toLocaleString("id-ID") : "Waktu tidak tersedia"}{typeof latest.accuracy_meters === "number" ? ` · Akurasi ±${Math.round(latest.accuracy_meters)} m` : ""}</Popup>
+      </CircleMarker>}
+    </MapContainer>
+    <div className="map-attribution-note">Jejak GPS berdasarkan waktu pengambilan perangkat · Peta © OpenStreetMap</div>
+  </div>;
+}
+
+function FitHistoryBounds({ positions }: { positions: LatLngExpression[] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (positions.length > 1) map.fitBounds(positions as LatLngBoundsExpression, { padding: [24, 24] });
+    else map.setView(positions[0], 15);
+  }, [map, positions]);
+  return null;
 }
